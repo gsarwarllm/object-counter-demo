@@ -1,0 +1,323 @@
+openapi: 3.0.3
+info:
+  title: Object Counter API
+  version: 1.1.0
+  description: >
+    Detects objects in an image, counts those whose confidence score is at or above a
+    threshold (grouped by class) and keeps accumulated totals. Several models can be served
+    side by side; `model_name` selects one and `GET /models` lists them.
+
+
+    Errors use RFC 7807 `application/problem+json`. Unknown routes (404) and wrong methods
+    (405) return the same problem format.
+servers:
+  - url: /
+    description: The server this spec is served from (http://localhost:5000 with make run)
+tags:
+  - name: counting
+    description: Count objects and keep running totals
+  - name: predictions
+    description: Inspect the raw predictions (read-only)
+  - name: models
+    description: The models that can answer requests
+
+paths:
+  /object-count:
+    post:
+      tags: [counting]
+      operationId: countObjects
+      summary: Count objects above the threshold and update the totals
+      description: >
+        Not idempotent: each call adds the detected counts to the stored totals. All models
+        add to the same totals.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/ImageRequest' }
+            encoding:
+              file: { contentType: 'image/jpeg, image/png' }
+      responses:
+        '200':
+          description: Counts for this image and the accumulated totals
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountResponse' }
+              example:
+                current_objects: [ { object_class: person, count: 1 } ]
+                total_objects: [ { object_class: cat, count: 3 }, { object_class: person, count: 1 } ]
+                model: { name: ssd_mobilenet_v2, version: '1' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /object-predictions:
+    post:
+      tags: [predictions]
+      operationId: listPredictions
+      summary: List the predictions above the threshold
+      description: Read-only and idempotent. Doesn't change the stored totals.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/ImageRequest' }
+            encoding:
+              file: { contentType: 'image/jpeg, image/png' }
+      responses:
+        '200':
+          description: Predictions with score >= threshold, sorted by score (highest first)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PredictionsResponse' }
+              example:
+                threshold: 0.5
+                count: 1
+                predictions:
+                  - class_name: cat
+                    score: 0.9991
+                    box: { xmin: 0.3673, ymin: 0.2783, xmax: 0.7358, ymax: 0.6989 }
+                model: { name: ssd_mobilenet_v2, version: '1' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503':
+          description: The object detector is unavailable
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              example:
+                type: about:blank
+                title: Object detector unavailable
+                status: 503
+                detail: The object detector is unavailable
+                instance: /object-predictions
+
+  /models:
+    get:
+      tags: [models]
+      operationId: listModels
+      summary: List the models that model_name accepts
+      responses:
+        '200':
+          description: The served models and the default one
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelsResponse' }
+              example:
+                default_model: ssd_mobilenet_v2
+                models:
+                  - { name: acme_shelf_detector, version: '1' }
+                  - { name: ssd_mobilenet_v2, version: '1' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  schemas:
+    ImageRequest:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+          description: JPEG or PNG image, at most MAX_UPLOAD_BYTES (10 MB by default)
+        threshold:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          default: 0.5
+          description: Minimum confidence score (inclusive)
+        model_name:
+          type: string
+          description: Model to use (see GET /models). Missing or empty means the default model.
+          example: acme_shelf_detector
+    Box:
+      type: object
+      description: Bounding box, coordinates normalised to [0, 1]
+      required: [xmin, ymin, xmax, ymax]
+      properties:
+        xmin: { type: number, minimum: 0, maximum: 1 }
+        ymin: { type: number, minimum: 0, maximum: 1 }
+        xmax: { type: number, minimum: 0, maximum: 1 }
+        ymax: { type: number, minimum: 0, maximum: 1 }
+    Prediction:
+      type: object
+      required: [class_name, score, box]
+      properties:
+        class_name: { type: string, example: cat }
+        score: { type: number, minimum: 0, maximum: 1, example: 0.9991 }
+        box: { $ref: '#/components/schemas/Box' }
+    ObjectCount:
+      type: object
+      required: [object_class, count]
+      properties:
+        object_class: { type: string, example: cat }
+        count: { type: integer, minimum: 0, example: 2 }
+    Model:
+      type: object
+      description: The model that produced a response
+      required: [name, version]
+      properties:
+        name: { type: string, example: ssd_mobilenet_v2 }
+        version:
+          type: string
+          nullable: true
+          description: Registry version served by TF Serving; null in dev, where fake detectors answer
+          example: '1'
+    ModelsResponse:
+      type: object
+      required: [default_model, models]
+      properties:
+        default_model: { type: string, example: ssd_mobilenet_v2 }
+        models:
+          type: array
+          description: Sorted by name
+          items: { $ref: '#/components/schemas/Model' }
+    CountResponse:
+      type: object
+      required: [current_objects, total_objects, model]
+      properties:
+        current_objects:
+          type: array
+          description: Counts for this image
+          items: { $ref: '#/components/schemas/ObjectCount' }
+        total_objects:
+          type: array
+          description: Accumulated totals across all requests and models
+          items: { $ref: '#/components/schemas/ObjectCount' }
+        model: { $ref: '#/components/schemas/Model' }
+    PredictionsResponse:
+      type: object
+      required: [threshold, count, predictions, model]
+      properties:
+        threshold: { type: number, minimum: 0, maximum: 1 }
+        count:
+          type: integer
+          minimum: 0
+          description: Number of predictions returned
+        predictions:
+          type: array
+          items: { $ref: '#/components/schemas/Prediction' }
+        model: { $ref: '#/components/schemas/Model' }
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string, example: threshold }
+        message: { type: string, example: must be between 0.0 and 1.0 }
+    Problem:
+      type: object
+      description: RFC 7807 problem details
+      required: [type, title, status, detail, instance]
+      properties:
+        type: { type: string, default: about:blank }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance:
+          type: string
+          description: The request path
+        errors:
+          type: array
+          description: One entry per invalid field (validation errors only)
+          items: { $ref: '#/components/schemas/FieldError' }
+
+  responses:
+    BadRequest:
+      description: Invalid request (missing or invalid field, unreadable image, unknown model)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          examples:
+            invalidThreshold:
+              summary: threshold outside 0-1
+              value:
+                type: about:blank
+                title: Invalid request
+                status: 400
+                detail: Request validation failed
+                instance: /object-count
+                errors: [ { field: threshold, message: must be between 0.0 and 1.0 } ]
+            thresholdNotANumber:
+              summary: threshold is not a number
+              value:
+                type: about:blank
+                title: Invalid request
+                status: 400
+                detail: Request validation failed
+                instance: /object-count
+                errors: [ { field: threshold, message: must be a number } ]
+            missingFile:
+              summary: no file uploaded
+              value:
+                type: about:blank
+                title: Invalid request
+                status: 400
+                detail: Request validation failed
+                instance: /object-count
+                errors: [ { field: file, message: is required } ]
+            unknownModel:
+              summary: model_name not in GET /models
+              value:
+                type: about:blank
+                title: Invalid request
+                status: 400
+                detail: Request validation failed
+                instance: /object-count
+                errors:
+                  - field: model_name
+                    message: "unknown model 'gpt'; available: acme_shelf_detector, ssd_mobilenet_v2"
+            invalidImage:
+              summary: file isn't a JPEG or PNG image
+              value:
+                type: about:blank
+                title: Invalid image
+                status: 400
+                detail: file must be a JPEG or PNG image
+                instance: /object-count
+    PayloadTooLarge:
+      description: Upload larger than MAX_UPLOAD_BYTES (10 MB by default)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: about:blank
+            title: Payload too large
+            status: 413
+            detail: Uploads are limited to 10485760 bytes
+            instance: /object-count
+    InternalError:
+      description: Unexpected error. Details are logged on the server, not returned.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: about:blank
+            title: Internal server error
+            status: 500
+            detail: An unexpected error occurred
+            instance: /object-count
+    ServiceUnavailable:
+      description: The object detector or the count repository is unavailable
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          examples:
+            detectorUnavailable:
+              summary: TF Serving unreachable or failing
+              value:
+                type: about:blank
+                title: Object detector unavailable
+                status: 503
+                detail: The object detector is unavailable
+                instance: /object-count
+            repositoryUnavailable:
+              summary: MongoDB or PostgreSQL unreachable
+              value:
+                type: about:blank
+                title: Count repository unavailable
+                status: 503
+                detail: The count store is unavailable
+                instance: /object-count

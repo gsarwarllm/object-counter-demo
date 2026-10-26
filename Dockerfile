@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY counter ./counter
 COPY models ./models
+COPY docs/openapi.yaml ./docs/openapi.yaml
 
 RUN useradd --create-home appuser
 USER appuser

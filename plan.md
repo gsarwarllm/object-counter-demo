@@ -510,7 +510,7 @@ Proposed in M3; these are the ones to implement.
 | M1.5 | Add request/response helpers: `parse_predictions_request`, `to_predictions_response_dto` (`{threshold, count, predictions[]}`) | `counter/entrypoints/schemas.py` (new) | unit tests for parsing and DTO shape | helpers tested in isolation |
 | M1.6 | Add route `POST /object-predictions` | `counter/entrypoints/webapp.py` | `test_webapp.py`: 200 shape, sorted, threshold filtering, totals unchanged after the call | curl example returns 200 |
 | M1.7 | Validation errors: missing file, bad or out-of-range threshold, non-image → 400 problem+json. Uses I1's helpers if M4 is done; otherwise minimal checks here, replaced by I1 later | `schemas.py`, `webapp.py` | `test_webapp.py`: each 400 case | invalid input returns 400 problem+json |
-| M1.8 | Docs: OpenAPI path (Appendix A) and README curl example | `docs/openapi.yaml`, `README.md` | `openapi-spec-validator docs/openapi.yaml` (if M8 is set up) | spec and README match the behaviour |
+| M1.8 | Docs: OpenAPI path (Appendix A) and README curl example | `docs/openapi.yaml`, `README.md` | `openapi-spec-validator docs/openapi.yaml` (if M8 is set up) | spec and README match the behaviour. **Done in M8** (the README example since M1) |
 
 **Acceptance criteria**
 - [ ] `curl -F threshold=0.5 -F file=@resources/images/cat.jpg .../object-predictions` returns 200 with the `PredictionsResponse` shape.

@@ -80,4 +80,4 @@ The assignment text above is unchanged. This section tracks what has been delive
 | At least 3 exercises solved | ✅ Tasks 1–5 |
 | Clean code | ✅ Hexagonal layers (the domain has no I/O), ruff lint and format in CI |
 | Automated, reproducible setup | ✅ `make setup && make test`; `make setup-models && make models && make up && make run-prod`; Docker Compose, `.env.example`, README built around `make` ([#8](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/8)) |
-| Additional documentation | 🟡 README, `docs/ANSWERS.md` (Tasks 3–5); the OpenAPI spec and the Task 6b answer are still to do |
+| Additional documentation | 🟡 README, `docs/ANSWERS.md` (Tasks 3–5), OpenAPI 3 contract [`docs/openapi.yaml`](docs/openapi.yaml) with Swagger UI at `/docs` and contract tests ([PR #14](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/14)); the Task 6b answer is still to do |

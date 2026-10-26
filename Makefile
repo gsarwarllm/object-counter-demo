@@ -14,7 +14,7 @@ REGISTRY := scripts/model_registry.py
 export PYTHONPATH := .
 
 .DEFAULT_GOAL := help
-.PHONY: help setup run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test test-integration test-models lint format security check clean
+.PHONY: help setup run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test test-integration test-models docs lint format security check clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -70,6 +70,9 @@ test-integration: ## Repo tests against real Postgres/Mongo (Docker, or TEST_POS
 test-models: ## Model registry script tests against a temporary MLflow registry (needs setup-models)
 	ENV=dev $(MPY) -m pytest -q -m models
 
+docs: ## Validate docs/openapi.yaml (served at /openapi.yaml, Swagger UI at /docs)
+	$(PY) -m openapi_spec_validator docs/openapi.yaml
+
 lint: ## ruff lint and format check
 	$(VENV)/bin/ruff check .
 	$(VENV)/bin/ruff format --check .
@@ -83,7 +86,7 @@ security: ## bandit and pip-audit
 	$(VENV)/bin/pip-audit -r requirements.txt
 	$(VENV)/bin/pip-audit -r requirements-models.txt
 
-check: lint security test ## Everything CI runs (except integration and model registry tests)
+check: lint docs security test ## Everything CI runs (except integration and model registry tests)
 
 clean: ## Remove caches and debug images
 	rm -rf .pytest_cache .ruff_cache tmp/debug

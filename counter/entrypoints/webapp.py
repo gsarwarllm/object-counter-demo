@@ -1,7 +1,9 @@
 import logging
 import os
+from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
+from flask_swagger_ui import get_swaggerui_blueprint
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from counter import config
@@ -23,6 +25,8 @@ from counter.entrypoints.schemas import (
 )
 
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+# The API contract, written by hand (contract first) and served as-is.
+OPENAPI_SPEC = Path(__file__).resolve().parents[2] / "docs" / "openapi.yaml"
 
 
 def create_app(
@@ -74,6 +78,15 @@ def create_app(
     @app.route("/models", methods=["GET"])
     def list_models():
         return jsonify(to_models_response_dto(detectors))
+
+    @app.route("/openapi.yaml", methods=["GET"])
+    def openapi_spec():
+        return send_file(OPENAPI_SPEC, mimetype="application/yaml")
+
+    # Swagger UI (assets bundled with flask-swagger-ui, so it works offline)
+    app.register_blueprint(
+        get_swaggerui_blueprint("/docs", "/openapi.yaml", config={"app_name": "Object Counter API"})
+    )
 
     register_error_handlers(app)
     return app

@@ -80,6 +80,8 @@ In dev (`ENV=dev`), every model in the manifest is served by the fake detector, 
 
 ## Call the service
 
+**API documentation:** Swagger UI at [http://localhost:5000/docs](http://localhost:5000/docs) (try every endpoint from the browser), and the OpenAPI 3 contract at `/openapi.yaml` ([`docs/openapi.yaml`](docs/openapi.yaml)). The spec is written by hand (contract first); tests check that every documented response, status code included, matches what the app returns.
+
 Count objects and update the running totals:
 
 ```bash
@@ -159,11 +161,14 @@ Copy `.env.example` to `.env` to override defaults; `make` and `docker compose` 
 | `make test` | Unit and API tests, no Docker needed |
 | `make test-integration` | Repo tests against real PostgreSQL and MongoDB, started with testcontainers (needs Docker, or set `TEST_POSTGRES_DSN` / `TEST_MONGO_HOST`) |
 | `make test-models` | Model registry scripts against a temporary MLflow registry (needs `make setup-models`) |
+| `make docs` | Validate `docs/openapi.yaml` |
 | `make lint` / `make format` | ruff check / apply fixes and formatting |
 | `make security` | bandit and pip-audit |
-| `make check` | lint + security + tests, the same as CI |
+| `make check` | lint + spec validation + security + tests, the same as CI |
 
 CI (`.github/workflows/ci.yml`) runs the test, integration, models, lint, security and docker jobs on every pull request.
+
+Contract tests (`tests/entrypoints/test_openapi.py`) send a real request for every path and status code in `docs/openapi.yaml` and validate the response against it, and fail if a route and the spec disagree.
 
 The same repo tests run against every `ObjectCountRepo` adapter (memory, MongoDB, PostgreSQL), so all of them behave the same way (`tests/adapters/test_count_repo_contract.py`).
 
