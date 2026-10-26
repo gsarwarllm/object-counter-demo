@@ -113,3 +113,21 @@ def test_object_predictions_rejects_non_image(client):
     assert response.status_code == 400
     assert response.mimetype == "application/problem+json"
     assert response.get_json()["title"] == "Invalid image"
+
+
+def test_object_count_returns_503_when_count_store_is_down(monkeypatch, image_path):
+    monkeypatch.setenv("COUNT_REPO", "postgres")
+    monkeypatch.setenv("DATABASE_URL", "host=127.0.0.1 port=1 dbname=counter user=counter")
+    monkeypatch.setenv("POSTGRES_TIMEOUT", "0.5")
+    app = create_app()
+
+    with app.test_client() as client:
+        response = client.post(
+            "/object-count",
+            data={"threshold": "0.5", "file": image_file(image_path)},
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 503
+    assert response.mimetype == "application/problem+json"
+    assert response.get_json()["title"] == "Service unavailable"

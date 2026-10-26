@@ -4,7 +4,7 @@ from io import BytesIO
 from flask import Flask, jsonify, request
 
 from counter import config
-from counter.domain.errors import InvalidImageError, ValidationError
+from counter.domain.errors import InvalidImageError, RepositoryUnavailableError, ValidationError
 from counter.entrypoints.schemas import parse_predictions_request, to_predictions_response_dto
 
 
@@ -46,6 +46,11 @@ def create_app():
     @app.errorhandler(InvalidImageError)
     def handle_invalid_image_error(error):
         return problem_response(400, "Invalid image", str(error))
+
+    @app.errorhandler(RepositoryUnavailableError)
+    def handle_repository_unavailable(error):
+        app.logger.error("Count repository unavailable: %s", error)
+        return problem_response(503, "Service unavailable", "The count store is unavailable")
 
     return app
 

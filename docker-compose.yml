@@ -1,0 +1,74 @@
+services:
+  tfserving:
+    image: tensorflow/serving:2.18.0
+    command: --model_config_file=/models/model_config.config
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./tmp/model:/models:ro
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/8501' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-counter}
+      POSTGRES_USER: ${POSTGRES_USER:-counter}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-counter}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Full stack in containers: `docker compose --profile app up -d --build`
+  app:
+    profiles: ["app"]
+    build: .
+    environment:
+      ENV: prod
+      TFS_HOST: tfserving
+      TFS_PORT: "8501"
+      MODEL_NAME: ${MODEL_NAME:-ssd_mobilenet_v2}
+      TFS_TIMEOUT: ${TFS_TIMEOUT:-30}
+      MONGO_HOST: mongo
+      MONGO_PORT: "27017"
+      MONGO_DB: ${MONGO_DB:-prod_counter}
+      COUNT_REPO: ${COUNT_REPO:-mongo}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-counter}
+      POSTGRES_USER: ${POSTGRES_USER:-counter}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-counter}
+    ports:
+      - "5000:5000"
+    depends_on:
+      tfserving:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+volumes:
+  mongo-data:
+  postgres-data:

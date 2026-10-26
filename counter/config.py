@@ -1,6 +1,8 @@
 import os
 
-from counter.adapters.count_repo import CountInMemoryRepo, CountMongoDBRepo
+from psycopg.conninfo import make_conninfo
+
+from counter.adapters.count_repo import CountInMemoryRepo, CountMongoDBRepo, CountPostgresRepo
 from counter.adapters.object_detector import FakeObjectDetector, TFSObjectDetector
 from counter.domain.actions import CountDetectedObjects, DetectObjects
 from counter.domain.ports import ObjectCountRepo, ObjectDetector
@@ -18,15 +20,43 @@ def prod_object_detector() -> ObjectDetector:
     return TFSObjectDetector(tfs_host, tfs_port, model_name, timeout)
 
 
-def dev_count_repo() -> ObjectCountRepo:
+def memory_count_repo() -> ObjectCountRepo:
     return CountInMemoryRepo()
 
 
-def prod_count_repo() -> ObjectCountRepo:
+def mongo_count_repo() -> ObjectCountRepo:
     mongo_host = os.environ.get("MONGO_HOST", "localhost")
     mongo_port = int(os.environ.get("MONGO_PORT", "27017"))
     mongo_db = os.environ.get("MONGO_DB", "prod_counter")
     return CountMongoDBRepo(host=mongo_host, port=mongo_port, database=mongo_db)
+
+
+def postgres_count_repo() -> ObjectCountRepo:
+    conninfo = os.environ.get("DATABASE_URL") or make_conninfo(
+        host=os.environ.get("POSTGRES_HOST", "localhost"),
+        port=os.environ.get("POSTGRES_PORT", "5432"),
+        dbname=os.environ.get("POSTGRES_DB", "counter"),
+        user=os.environ.get("POSTGRES_USER", "counter"),
+        password=os.environ.get("POSTGRES_PASSWORD", "counter"),
+    )
+    timeout = float(os.environ.get("POSTGRES_TIMEOUT", "5"))
+    return CountPostgresRepo(conninfo, timeout=timeout)
+
+
+COUNT_REPOS = {
+    "memory": memory_count_repo,
+    "mongo": mongo_count_repo,
+    "postgres": postgres_count_repo,
+}
+
+
+def get_count_repo() -> ObjectCountRepo:
+    """COUNT_REPO picks the store; defaults keep the old behaviour (dev: memory, prod: mongo)."""
+    default = "mongo" if _env() == "prod" else "memory"
+    repo_name = os.environ.get("COUNT_REPO", default)
+    if repo_name not in COUNT_REPOS:
+        raise ValueError(f"Unknown COUNT_REPO {repo_name!r}; expected one of {sorted(COUNT_REPOS)}")
+    return COUNT_REPOS[repo_name]()
 
 
 def get_object_detector() -> ObjectDetector:
@@ -36,7 +66,7 @@ def get_object_detector() -> ObjectDetector:
 def get_count_action(object_detector: ObjectDetector = None) -> CountDetectedObjects:
     if object_detector is None:
         object_detector = get_object_detector()
-    return CountDetectedObjects(object_detector, globals()[f"{_env()}_count_repo"]())
+    return CountDetectedObjects(object_detector, get_count_repo())
 
 
 def get_detect_action(object_detector: ObjectDetector = None) -> DetectObjects:

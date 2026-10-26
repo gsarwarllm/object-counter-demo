@@ -1,3 +1,16 @@
+[project]
+name = "object-counter"
+version = "0.1.0"
+description = "Flask API that detects and counts objects in images (Hexagonal Architecture demo)"
+requires-python = ">=3.12,<3.13"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "integration: needs Docker (real databases via testcontainers)",
+]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100

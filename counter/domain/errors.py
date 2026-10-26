@@ -7,3 +7,7 @@ class ValidationError(Exception):
 
 class InvalidImageError(Exception):
     pass
+
+
+class RepositoryUnavailableError(Exception):
+    """The count store can't be reached (connection refused, timeout, ...)."""
