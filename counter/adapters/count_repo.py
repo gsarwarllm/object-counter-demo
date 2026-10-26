@@ -11,6 +11,8 @@ from counter.domain.models import ObjectCount
 from counter.domain.ports import ObjectCountRepo
 
 SCHEMA_FILE = Path(__file__).parent / "sql" / "001_object_counts.sql"
+# Arbitrary constant identifying the schema-creation advisory lock.
+SCHEMA_LOCK_ID = 7_428_311
 
 
 class CountInMemoryRepo(ObjectCountRepo):
@@ -117,7 +119,10 @@ class CountPostgresRepo(ObjectCountRepo):
         self.__pool.close()
 
     def ensure_schema(self):
+        # Concurrent CREATE TABLE IF NOT EXISTS can still fail with a unique violation on
+        # pg_type; the advisory lock (released at commit) serializes it across processes.
         with self.__pool.connection() as conn:
+            conn.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK_ID,))
             conn.execute(SCHEMA_FILE.read_text())
         self.__schema_ready = True
 

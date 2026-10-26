@@ -670,11 +670,26 @@ tests/
 **Changes:** pytest markers `integration`, `e2e` in `pyproject.toml`; fixtures in
 `tests/conftest.py`; `tests/fixtures/tfs_response_cat.json`; the Makefile targets from M7.
 
+**Implemented (M6a)** — the strategy and theory are in [`docs/TESTING.md`](docs/TESTING.md),
+the summary in `docs/ANSWERS.md` (Task 6(a)). Differences from the sketch above:
+- Layout: unit and component tests mirror the code (`tests/domain/`, `tests/adapters/`,
+  `tests/entrypoints/`); integration and e2e tests are grouped by kind (`tests/integration/`,
+  `tests/e2e/`); shared database fixtures in `tests/conftest.py`.
+- TF Serving integration uses an in-process stub HTTP server replaying
+  `tests/fixtures/tfs_predict_response.json` (instead of the `responses` library), so the real
+  HTTP request is exercised; it needs no Docker and runs in `make test`.
+- E2E runs against the Compose stack incl. the app **container** and both real models pulled
+  from the MLflow registry (`make e2e`, CI job `e2e`), once with MongoDB and once with
+  PostgreSQL; every response is validated against `docs/openapi.yaml`.
+- Markers: `integration`, `models`, `e2e`. Coverage: `pytest-cov`, `fail_under = 90`.
+- The new API-level concurrency test found a race in `CountPostgresRepo` schema creation
+  (unique violation on `pg_type`), fixed with `pg_advisory_xact_lock`.
+
 **Acceptance criteria**
-- [ ] `make test` runs in under 10 s without Docker.
-- [ ] `make test-integration` and `make test-e2e` pass with Docker.
-- [ ] Every status code documented in OpenAPI has at least one test.
-- [ ] Domain + adapter line coverage ≥ 85% (`pytest --cov`).
+- [x] `make test` runs in under 10 s without Docker (124 tests, ~6 s).
+- [x] `make test-integration` and `make test-e2e` pass with Docker (CI jobs `integration` and `e2e`).
+- [x] Every status code documented in OpenAPI has at least one test (enforced by `test_every_documented_status_code_is_tested`).
+- [x] Domain + adapter line coverage ≥ 85% (`make coverage`: ~98% of `counter/`, CI gate 90%).
 
 #### 6(b) Multiple deep-learning frameworks (outline only, in `docs/ANSWERS.md`)
 

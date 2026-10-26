@@ -10,6 +10,19 @@ testpaths = ["tests"]
 markers = [
     "integration: needs Docker (real databases via testcontainers)",
     "models: needs MLflow (requirements-models.txt): model registry scripts",
+    "e2e: needs the running stack (make e2e); black-box HTTP tests with the real models",
+]
+
+[tool.coverage.run]
+source = ["counter"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "raise NotImplementedError",
+    'if __name__ == "__main__":',
 ]
 
 [tool.ruff]

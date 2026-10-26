@@ -1,0 +1,17 @@
+{
+  "predictions": [
+    {
+      "num_detections": 3.0,
+      "detection_classes": [17.0, 18.0, 1.0, 62.0],
+      "detection_scores": [0.97, 0.64, 0.12, 0.0],
+      "detection_boxes": [
+        [0.278, 0.367, 0.699, 0.736],
+        [0.1, 0.1, 0.4, 0.3],
+        [0.5, 0.5, 0.9, 0.9],
+        [0.0, 0.0, 0.0, 0.0]
+      ],
+      "raw_detection_scores": [[0.01, 0.02]],
+      "raw_detection_boxes": [[0.0, 0.0, 0.0, 0.0]]
+    }
+  ]
+}

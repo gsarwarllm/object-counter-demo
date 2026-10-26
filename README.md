@@ -158,15 +158,17 @@ Copy `.env.example` to `.env` to override defaults; `make` and `docker compose` 
 
 | Command | Does |
 |---|---|
-| `make test` | Unit and API tests, no Docker needed |
+| `make test` | Unit, API, contract and stub-TF-Serving integration tests: no Docker needed, ~6 s |
+| `make coverage` | The same with a coverage report (fails under 90%) |
 | `make test-integration` | Repo tests against real PostgreSQL and MongoDB, started with testcontainers (needs Docker, or set `TEST_POSTGRES_DSN` / `TEST_MONGO_HOST`) |
 | `make test-models` | Model registry scripts against a temporary MLflow registry (needs `make setup-models`) |
+| `make e2e` | Start the whole stack in Docker (app container, TF Serving with the real models, databases) and run the end-to-end tests; run `make models` first. `make test-e2e` runs the tests against a stack that's already up |
 | `make docs` | Validate `docs/openapi.yaml` |
 | `make lint` / `make format` | ruff check / apply fixes and formatting |
 | `make security` | bandit and pip-audit |
 | `make check` | lint + spec validation + security + tests, the same as CI |
 
-CI (`.github/workflows/ci.yml`) runs the test, integration, models, lint, security and docker jobs on every pull request.
+CI (`.github/workflows/ci.yml`) runs the test, integration, models, e2e, lint, security and docker jobs on every pull request. **How and why the project is tested at each level is explained in [`docs/TESTING.md`](docs/TESTING.md).**
 
 Contract tests (`tests/entrypoints/test_openapi.py`) send a real request for every path and status code in `docs/openapi.yaml` and validate the response against it, and fail if a route and the spec disagree.
 

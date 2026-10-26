@@ -15,7 +15,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - run: python -m pytest -q -m "not integration and not models"
+      - run: python -m pytest -q -m "not integration and not models and not e2e" --cov
         env:
           ENV: dev
 
@@ -49,6 +49,48 @@ jobs:
       - run: python -m pytest -q -m models -rs
         env:
           ENV: dev
+
+  e2e:
+    # The whole stack with the real models: the only job that runs TF Serving for real.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt -r requirements-models.txt
+      - uses: actions/cache@v4
+        with:
+          path: tmp/downloads
+          key: models-${{ hashFiles('models/models.json') }}
+      - name: Download, publish to the MLflow registry, and pull the models
+        run: |
+          python scripts/model_registry.py download
+          python scripts/model_registry.py publish
+          python scripts/model_registry.py pull
+        env:
+          PYTHONPATH: .
+      - name: Start the stack (app, TF Serving, MongoDB, PostgreSQL)
+        run: docker compose --profile app up -d --build --wait
+      - name: End-to-end tests (counts in MongoDB)
+        run: |
+          python -m pytest -q -m e2e -rs | tee e2e-mongo.log
+          ! grep -q SKIPPED e2e-mongo.log
+        env:
+          E2E_BASE_URL: http://localhost:5000
+          E2E_COUNT_REPO: mongo
+      - name: Switch the app to PostgreSQL
+        run: COUNT_REPO=postgres docker compose --profile app up -d --wait app
+      - name: End-to-end tests (counts in PostgreSQL)
+        run: |
+          python -m pytest -q -m e2e -rs | tee e2e-postgres.log
+          ! grep -q SKIPPED e2e-postgres.log
+        env:
+          E2E_BASE_URL: http://localhost:5000
+          E2E_COUNT_REPO: postgres
+      - if: failure()
+        run: docker compose --profile app logs --tail 200
 
   lint:
     runs-on: ubuntu-latest

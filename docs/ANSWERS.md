@@ -4,6 +4,7 @@ This file answers the written parts of the assignment (`Task.md`):
 
 - [Task 3: Code review and proposed improvements](#task-3-code-review-and-proposed-improvements) (with Task 4: which improvements are implemented)
 - [Task 5: Multiple internally trained models](#task-5-multiple-internally-trained-models)
+- [Task 6(a): Integration and end-to-end tests](#task-6a-integration-and-end-to-end-tests) (full strategy in [`TESTING.md`](TESTING.md))
 - Task 6b (multiple deep-learning frameworks): to be added
 
 ## Task 3: Code review and proposed improvements
@@ -20,9 +21,9 @@ I reviewed the original code (commit `1095f74`, before any of my changes) and li
 | [Architecture and domain code](#32-architecture-and-domain-code) | 6 | 3 | 0 | 3 |
 | [Adapters](#33-adapters-tf-serving-and-mongodb) | 6 | 5 | 1 | 0 |
 | [Setup and documentation](#34-setup-and-documentation) | 7 | 5 | 0 | 2 |
-| [Tests](#35-tests) | 5 | 4 | 0 | 1 |
+| [Tests](#35-tests) | 5 | 5 | 0 | 0 |
 | [CI, security and dependencies](#36-ci-security-and-dependencies) | 4 | 4 | 0 | 0 |
-| **Total** | **33** | **26** | **1** | **6** |
+| **Total** | **33** | **27** | **1** | **5** |
 
 ### 3.1 API and validation
 
@@ -76,7 +77,7 @@ I reviewed the original code (commit `1095f74`, before any of my changes) and li
 | R26 | The webapp test sends a `model_name` field the app ignores. | Misleading: suggests model selection exists. | Remove it (or implement selection in Task 5). | ✅ [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11): removed |
 | R27 | No tests for adapters, persistence or concurrency. | Bugs like R16 went unnoticed. | Integration tests against real databases (testcontainers), including 20 concurrent updates. | ✅ [PR #9](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/9): [`tests/adapters/`](../tests/adapters/), CI `integration` job |
 | R28 | No failure-path tests (database down, invalid input). | Error handling can regress silently. | Tests for each error status. | ✅ Every error status is tested on both endpoints: 400, 413, 503 (detector and database), 404/405 and 500 ([PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11)); repo-down tests in PR #9 and [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11) |
-| R29 | No end-to-end test of the real stack. | The TF Serving integration (payload format, label mapping) is untested. | e2e tests against the compose stack (`make test-e2e`). | 📋 (M6a). So far CI only smoke-tests the Docker image with the fake detector (PR #8) |
+| R29 | No end-to-end test of the real stack. | The TF Serving integration (payload format, label mapping) is untested. | e2e tests against the compose stack (`make test-e2e`). | ✅ [#15](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/15): e2e tests against the Compose stack with the real models in TF Serving, run in CI against MongoDB and PostgreSQL ([`tests/e2e/`](../tests/e2e/), [`TESTING.md`](TESTING.md)) |
 
 ### 3.6 CI, security and dependencies
 
@@ -89,9 +90,9 @@ I reviewed the original code (commit `1095f74`, before any of my changes) and li
 
 ### Task 4: implemented improvements
 
-Task 4 asks to implement at least one proposal. **26 of the 33 are implemented**: R1–R8, R12–R16, R18–R22, R25–R28 and R30–R33, and **R17 partly** (per-model label maps, with Task 5). Most code fixes are in [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11) (plan item M4); setup in PR #8, the PostgreSQL adapter and contract tests in PR #9, CI and security in PRs #2 and #6.
+Task 4 asks to implement at least one proposal. **27 of the 33 are implemented**: R1–R8, R12–R16, R18–R22 and R25–R33, and **R17 partly** (per-model label maps, with Task 5). Most code fixes are in [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11) (plan item M4); setup in PR #8, the PostgreSQL adapter and contract tests in PR #9, CI and security in PRs #2 and #6.
 
-The 6 not implemented, and the open part of R17, are proposals only, or are covered by later plan items:
+The 5 not implemented, and the open part of R17, are proposals only, or are covered by later plan items:
 
 | ID | Why not (yet) |
 |---|---|
@@ -101,7 +102,6 @@ The 6 not implemented, and the open part of R17, are proposals only, or are cove
 | R17 (gRPC part) | gRPC is a performance change that needs a live TF Serving to measure |
 | R23 | A lock file is a good next step for fully reproducible builds |
 | R24 | Editor configuration, not part of the application |
-| R29 | Full end-to-end tests against the compose stack are plan item M6a |
 
 ## Task 5: Multiple internally trained models
 
@@ -187,3 +187,37 @@ make up && make run-prod
 curl http://localhost:5000/models
 curl -F model_name=acme_shelf_detector -F file=@resources/images/cat.jpg http://localhost:5000/object-predictions
 ```
+
+## Task 6(a): Integration and end-to-end tests
+
+> Improve the testing by adding integration and e2e tests (or any other improvements you consider necessary).
+
+The full strategy (the test levels and what each proves, test doubles, contract tests, determinism with ML models, coverage, and what isn't tested) is in [`TESTING.md`](TESTING.md). This section summarises it.
+
+### Before and after
+
+| | Original code | Now |
+|---|---|---|
+| Tests | 5 (4 domain unit tests, and 1 API test that only checked the body `!= None`) | **161**, at every level |
+| Integration | none | real PostgreSQL and MongoDB via Testcontainers; the API against both; the app over HTTP against a stub TF Serving |
+| End-to-end | none | the Docker Compose stack with **both real models in TF Serving**, in CI, against MongoDB and then PostgreSQL |
+| API contract | none | every documented path and status code validated against `docs/openapi.yaml` |
+| CI | none | `test` (with a 90% coverage gate), `integration`, `models`, `e2e`, `lint`, `security`, `docker` on every PR |
+
+### What was added in this task ([#15](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/15))
+
+- **Integration, no Docker needed:** [`tests/integration/test_tf_serving_http.py`](../tests/integration/test_tf_serving_http.py) runs the app in prod mode against an in-process HTTP server replaying a recorded TF Serving response. It checks the URL with the pinned version, the uint8 RGB batch actually sent for RGB, RGBA, greyscale and palette images, the mapping of the response, and that HTTP errors, malformed bodies, timeouts and a down server all become 503.
+- **Integration with real databases:** [`tests/integration/test_api_with_databases.py`](../tests/integration/test_api_with_databases.py) checks, through the HTTP API, that counts are stored in PostgreSQL and MongoDB, survive an app restart, that `/object-predictions` writes nothing, and that 20 concurrent requests lose no update.
+- **End-to-end:** [`tests/e2e/test_e2e.py`](../tests/e2e/test_e2e.py) runs black-box HTTP tests against the running stack (app container, TF Serving with the models pulled from the MLflow registry, a real database). It checks the real detections (cat, person), that the two models differ, RGBA and greyscale on the real model, totals in the API and in the database, and validates every response against the OpenAPI spec. CI runs it with counts in MongoDB, then in PostgreSQL.
+- **Coverage:** `make coverage`; about 98% of `counter/` from the fast suite, and CI fails below 90%.
+- **Tooling:** markers `integration`, `models` and `e2e` keep the default `make test` under 10 seconds with no Docker; `make test-integration`, `make test-models` and `make e2e` run the rest. The `integration` and `e2e` CI jobs fail on any skipped test.
+
+### A bug the new tests found
+
+The API-level concurrency test failed in 3 of 5 runs: on a fresh PostgreSQL database, concurrent first requests ran `CREATE TABLE IF NOT EXISTS` at the same time and one failed with a unique-constraint violation on `pg_type`, so the client got a 500. Unit tests and the earlier repository tests couldn't see it, because their fixtures created the table before the concurrent part. The fix serialises schema creation with a transaction-level advisory lock (`pg_advisory_xact_lock`), which also works across gunicorn worker processes. A regression test reproduces the race (it failed in 4 of 5 runs without the fix).
+
+### Why these levels
+
+- **Unit and component tests** stay the bulk (fast, precise), possible because the hexagonal ports let every external system be replaced by a fake.
+- **Integration tests use the real technologies**, not substitutes like SQLite, because the risky parts are exactly the SQL, the HTTP protocol and concurrency.
+- **E2E tests are few and assert properties, not exact scores**: they prove the deployed image, Compose wiring, model loading and payload format work together, while exact model accuracy belongs to model evaluation.

@@ -14,7 +14,7 @@ REGISTRY := scripts/model_registry.py
 export PYTHONPATH := .
 
 .DEFAULT_GOAL := help
-.PHONY: help setup run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test test-integration test-models docs lint format security check clean
+.PHONY: help setup run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test coverage test-integration test-models e2e-up test-e2e e2e docs lint format security check clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -61,14 +61,25 @@ down: ## Stop the Docker services
 logs: ## Follow the Docker service logs
 	docker compose logs -f
 
-test: ## Unit and API tests (no Docker needed)
-	ENV=dev $(PY) -m pytest -q -m "not integration and not models"
+test: ## Unit, API, contract and stub integration tests (no Docker needed, < 10 s)
+	ENV=dev $(PY) -m pytest -q -m "not integration and not models and not e2e"
+
+coverage: ## The same tests with a coverage report (fails under 90%)
+	ENV=dev $(PY) -m pytest -q -m "not integration and not models and not e2e" --cov
 
 test-integration: ## Repo tests against real Postgres/Mongo (Docker, or TEST_POSTGRES_DSN/TEST_MONGO_HOST)
 	ENV=dev $(PY) -m pytest -q -m integration
 
 test-models: ## Model registry script tests against a temporary MLflow registry (needs setup-models)
 	ENV=dev $(MPY) -m pytest -q -m models
+
+e2e-up: ## Build and start the whole stack in Docker (app, TF Serving, MongoDB, PostgreSQL)
+	docker compose --profile app up -d --build --wait
+
+test-e2e: ## End-to-end tests against the running stack (E2E_COUNT_REPO=mongo|postgres also checks the DB)
+	E2E_BASE_URL=$(or $(E2E_BASE_URL),http://localhost:5000) $(PY) -m pytest -q -m e2e -rs
+
+e2e: e2e-up test-e2e ## Start the stack and run the end-to-end tests (run `make models` first)
 
 docs: ## Validate docs/openapi.yaml (served at /openapi.yaml, Swagger UI at /docs)
 	$(PY) -m openapi_spec_validator docs/openapi.yaml
@@ -86,7 +97,7 @@ security: ## bandit and pip-audit
 	$(VENV)/bin/pip-audit -r requirements.txt
 	$(VENV)/bin/pip-audit -r requirements-models.txt
 
-check: lint docs security test ## Everything CI runs (except integration and model registry tests)
+check: lint docs security test ## lint + spec + security + tests (CI also runs integration, models, e2e)
 
 clean: ## Remove caches and debug images
 	rm -rf .pytest_cache .ruff_cache tmp/debug
