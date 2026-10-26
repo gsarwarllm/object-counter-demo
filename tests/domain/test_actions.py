@@ -61,3 +61,26 @@ class TestDetectObjects:
 
     def test_returns_empty_list_when_nothing_over_threshold(self, object_detector) -> None:
         assert DetectObjects(object_detector).execute(None, 0.95) == []
+
+
+def test_debug_image_writer_gets_all_and_valid_predictions():
+    detector = Mock()
+    detector.predict.return_value = [
+        generate_prediction("cat", 0.9),
+        generate_prediction("dog", 0.1),
+    ]
+    writer = Mock()
+    image = object()
+
+    DetectObjects(detector, debug_image_writer=writer).execute(image, 0.5)
+
+    assert writer.write.call_args_list[0].args == (
+        image,
+        detector.predict.return_value,
+        "all_predictions.jpg",
+    )
+    assert writer.write.call_args_list[1].args == (
+        image,
+        [generate_prediction("cat", 0.9)],
+        "valid_predictions_with_threshold_0.5.jpg",
+    )

@@ -1,12 +1,19 @@
 import json
+import logging
+from pathlib import Path
 from typing import BinaryIO
 
 import numpy as np
 import requests
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
+from counter.domain.errors import DetectorUnavailableError, InvalidImageError
 from counter.domain.models import Box, Prediction
 from counter.domain.ports import ObjectDetector
+
+LABEL_MAP_FILE = Path(__file__).resolve().parent / "mscoco_label_map.json"
+
+logger = logging.getLogger(__name__)
 
 
 class FakeObjectDetector(ObjectDetector):
@@ -28,26 +35,37 @@ class TFSObjectDetector(ObjectDetector):
 
     def predict(self, image: BinaryIO) -> list[Prediction]:
         np_image = self.__to_np_array(image)
-        predict_request = json.dumps({"instances": np.expand_dims(np_image, 0).tolist()})
-        print(f"Sending request to TFS...{self.url}")
-        response = requests.post(self.url, data=predict_request, timeout=self.timeout)
-        predictions = response.json()["predictions"][0]
-        return self.__raw_predictions_to_domain(predictions)
+        logger.info("Sending request to TF Serving: %s", self.url)
+        try:
+            response = requests.post(
+                self.url,
+                json={"instances": np.expand_dims(np_image, 0).tolist()},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return self.__raw_predictions_to_domain(response.json()["predictions"][0])
+        except requests.RequestException as error:
+            raise DetectorUnavailableError(f"TF Serving request failed: {error}") from error
+        except (ValueError, KeyError, IndexError, TypeError) as error:
+            raise DetectorUnavailableError(f"Unexpected TF Serving response: {error}") from error
 
     @staticmethod
     def __build_classes_dict():
-        with open("counter/adapters/mscoco_label_map.json") as json_file:
+        with open(LABEL_MAP_FILE) as json_file:
             labels = json.load(json_file)
             return {label["id"]: label["display_name"] for label in labels}
 
     @staticmethod
     def __to_np_array(image: BinaryIO):
-        image_ = Image.open(image)
-        (im_width, im_height) = image_.size
-        return np.array(image_.getdata()).reshape((im_height, im_width, 3)).astype(np.uint8)
+        image.seek(0)
+        try:
+            with Image.open(image) as opened_image:
+                # RGBA and greyscale images become the 3-channel input the model expects.
+                return np.asarray(opened_image.convert("RGB"), dtype=np.uint8)
+        except (UnidentifiedImageError, OSError) as error:
+            raise InvalidImageError("file is not a readable image") from error
 
     def __raw_predictions_to_domain(self, raw_predictions: dict) -> list[Prediction]:
-        print("Parsing raw predictions...")
         num_detections = int(raw_predictions.get("num_detections"))
         predictions = []
         for i in range(num_detections):
@@ -59,8 +77,8 @@ class TFSObjectDetector(ObjectDetector):
                 ymax=detection_box[2],
             )
             detection_score = raw_predictions["detection_scores"][i]
-            detection_class = raw_predictions["detection_classes"][i]
-            class_name = self.classes_dict[detection_class]
+            detection_class = int(raw_predictions["detection_classes"][i])
+            class_name = self.classes_dict.get(detection_class, f"unknown_{detection_class}")
             predictions.append(Prediction(class_name=class_name, score=detection_score, box=box))
-        print(predictions)
+        logger.info("TF Serving returned %d detections", len(predictions))
         return predictions

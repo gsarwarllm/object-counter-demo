@@ -4,6 +4,7 @@ from pathlib import Path
 import psycopg
 from psycopg_pool import ConnectionPool, PoolTimeout
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
 from counter.domain.errors import RepositoryUnavailableError
 from counter.domain.models import ObjectCount
@@ -39,32 +40,36 @@ class CountInMemoryRepo(ObjectCountRepo):
 
 
 class CountMongoDBRepo(ObjectCountRepo):
-    def __init__(self, host, port, database):
-        self.__host = host
-        self.__port = port
-        self.__database = database
-
-    def __get_counter_col(self):
-        client = MongoClient(self.__host, self.__port)
-        db = client[self.__database]
-        counter_col = db.counter
-        return counter_col
+    def __init__(self, host, port, database, timeout: float = 5.0):
+        # One client (and connection pool) for the repo's lifetime; it connects lazily.
+        self.__client = MongoClient(host, port, serverSelectionTimeoutMS=int(timeout * 1000))
+        self.__counter_col = self.__client[database].counter
 
     def read_values(self, object_classes: list[str] | None = None) -> list[ObjectCount]:
-        counter_col = self.__get_counter_col()
         query = {"object_class": {"$in": object_classes}} if object_classes is not None else None
-        counters = counter_col.find(query)
-        object_counts = []
-        for counter in counters:
-            object_counts.append(ObjectCount(counter["object_class"], counter["count"]))
-        return object_counts
+        with _mongo_errors():
+            counters = list(self.__counter_col.find(query))
+        return [ObjectCount(counter["object_class"], counter["count"]) for counter in counters]
 
     def update_values(self, new_values: list[ObjectCount]):
-        counter_col = self.__get_counter_col()
-        for value in new_values:
-            counter_col.update_one(
-                {"object_class": value.object_class}, {"$inc": {"count": value.count}}, upsert=True
-            )
+        with _mongo_errors():
+            for value in new_values:
+                self.__counter_col.update_one(
+                    {"object_class": value.object_class},
+                    {"$inc": {"count": value.count}},
+                    upsert=True,
+                )
+
+    def close(self):
+        self.__client.close()
+
+
+@contextmanager
+def _mongo_errors():
+    try:
+        yield
+    except PyMongoError as error:
+        raise RepositoryUnavailableError(f"MongoDB unavailable: {error}") from error
 
 
 class CountPostgresRepo(ObjectCountRepo):

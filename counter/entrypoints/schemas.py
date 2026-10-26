@@ -11,13 +11,14 @@ ACCEPTED_IMAGE_FORMATS = {"JPEG", "PNG"}
 
 
 @dataclass
-class PredictionsRequest:
+class ImageRequest:
     image: BytesIO
     threshold: float
 
 
-def parse_predictions_request(form, files) -> PredictionsRequest:
-    return PredictionsRequest(image=_parse_image(files), threshold=_parse_threshold(form))
+def parse_image_request(form, files) -> ImageRequest:
+    """Validates the multipart form shared by /object-count and /object-predictions."""
+    return ImageRequest(image=_parse_image(files), threshold=_parse_threshold(form))
 
 
 def to_predictions_response_dto(threshold: float, predictions: list[Prediction]) -> dict:

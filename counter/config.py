@@ -1,23 +1,33 @@
 import os
+from pathlib import Path
 
 from psycopg.conninfo import make_conninfo
 
 from counter.adapters.count_repo import CountInMemoryRepo, CountMongoDBRepo, CountPostgresRepo
+from counter.adapters.debug_image_writer import FileDebugImageWriter
 from counter.adapters.object_detector import FakeObjectDetector, TFSObjectDetector
 from counter.domain.actions import CountDetectedObjects, DetectObjects
-from counter.domain.ports import ObjectCountRepo, ObjectDetector
+from counter.domain.ports import DebugImageWriter, ObjectCountRepo, ObjectDetector
+
+DEBUG_IMAGES_DIR = Path("tmp") / "debug"
 
 
-def dev_object_detector() -> ObjectDetector:
+def fake_object_detector() -> ObjectDetector:
     return FakeObjectDetector()
 
 
-def prod_object_detector() -> ObjectDetector:
+def tfs_object_detector() -> ObjectDetector:
     tfs_host = os.environ.get("TFS_HOST", "localhost")
-    tfs_port = os.environ.get("TFS_PORT", "8501")
+    tfs_port = int(os.environ.get("TFS_PORT", "8501"))
     model_name = os.environ.get("MODEL_NAME", "ssd_mobilenet_v2")
     timeout = float(os.environ.get("TFS_TIMEOUT", "30"))
     return TFSObjectDetector(tfs_host, tfs_port, model_name, timeout)
+
+
+OBJECT_DETECTORS = {
+    "dev": fake_object_detector,
+    "prod": tfs_object_detector,
+}
 
 
 def memory_count_repo() -> ObjectCountRepo:
@@ -28,7 +38,8 @@ def mongo_count_repo() -> ObjectCountRepo:
     mongo_host = os.environ.get("MONGO_HOST", "localhost")
     mongo_port = int(os.environ.get("MONGO_PORT", "27017"))
     mongo_db = os.environ.get("MONGO_DB", "prod_counter")
-    return CountMongoDBRepo(host=mongo_host, port=mongo_port, database=mongo_db)
+    timeout = float(os.environ.get("MONGO_TIMEOUT", "5"))
+    return CountMongoDBRepo(host=mongo_host, port=mongo_port, database=mongo_db, timeout=timeout)
 
 
 def postgres_count_repo() -> ObjectCountRepo:
@@ -50,6 +61,14 @@ COUNT_REPOS = {
 }
 
 
+def get_object_detector() -> ObjectDetector:
+    """ENV picks the detector: dev = fake, prod = TF Serving."""
+    env = _env()
+    if env not in OBJECT_DETECTORS:
+        raise ValueError(f"Unknown ENV {env!r}; expected one of {sorted(OBJECT_DETECTORS)}")
+    return OBJECT_DETECTORS[env]()
+
+
 def get_count_repo() -> ObjectCountRepo:
     """COUNT_REPO picks the store; defaults keep the old behaviour (dev: memory, prod: mongo)."""
     default = "mongo" if _env() == "prod" else "memory"
@@ -59,20 +78,23 @@ def get_count_repo() -> ObjectCountRepo:
     return COUNT_REPOS[repo_name]()
 
 
-def get_object_detector() -> ObjectDetector:
-    return globals()[f"{_env()}_object_detector"]()
+def get_debug_image_writer() -> DebugImageWriter | None:
+    """DEBUG_IMAGES=1 saves annotated images to tmp/debug; off by default."""
+    if os.environ.get("DEBUG_IMAGES") == "1":
+        return FileDebugImageWriter(DEBUG_IMAGES_DIR)
+    return None
 
 
-def get_count_action(object_detector: ObjectDetector = None) -> CountDetectedObjects:
+def get_count_action(object_detector: ObjectDetector | None = None) -> CountDetectedObjects:
     if object_detector is None:
         object_detector = get_object_detector()
-    return CountDetectedObjects(object_detector, get_count_repo())
+    return CountDetectedObjects(object_detector, get_count_repo(), get_debug_image_writer())
 
 
-def get_detect_action(object_detector: ObjectDetector = None) -> DetectObjects:
+def get_detect_action(object_detector: ObjectDetector | None = None) -> DetectObjects:
     if object_detector is None:
         object_detector = get_object_detector()
-    return DetectObjects(object_detector)
+    return DetectObjects(object_detector, get_debug_image_writer())
 
 
 def _env() -> str:

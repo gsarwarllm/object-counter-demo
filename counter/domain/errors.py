@@ -11,3 +11,7 @@ class InvalidImageError(Exception):
 
 class RepositoryUnavailableError(Exception):
     """The count store can't be reached (connection refused, timeout, ...)."""
+
+
+class DetectorUnavailableError(Exception):
+    """The object detector can't be reached or returned an unusable response."""

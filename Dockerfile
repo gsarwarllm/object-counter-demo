@@ -14,6 +14,5 @@ RUN useradd --create-home appuser
 USER appuser
 
 EXPOSE 5000
-# -O skips the debug-image drawing in the domain actions.
-CMD ["python", "-O", "-m", "gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", \
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", \
      "counter.entrypoints.webapp:create_app()"]

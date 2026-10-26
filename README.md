@@ -71,6 +71,20 @@ List the predictions with a score at or above the threshold, sorted by score (do
 curl -F "threshold=0.5" -F "file=@resources/images/cat.jpg" http://localhost:5000/object-predictions
 ```
 
+Both endpoints take `threshold` (optional, `0`–`1`, default `0.5`, inclusive) and `file` (JPEG or PNG). Errors are returned as [RFC 7807](https://www.rfc-editor.org/rfc/rfc7807) `application/problem+json`:
+
+| Status | When |
+|---|---|
+| `400` | Missing `file`, `threshold` not a number or outside `0`–`1` (`errors` names the field), or a file that isn't a JPEG/PNG image |
+| `413` | Upload larger than `MAX_UPLOAD_BYTES` |
+| `503` | TF Serving or the count database is unreachable |
+| `500` | Unexpected error (details are logged, not returned) |
+
+```json
+{"type": "about:blank", "title": "Invalid request", "status": 400, "detail": "Request validation failed",
+ "instance": "/object-count", "errors": [{"field": "threshold", "message": "must be between 0.0 and 1.0"}]}
+```
+
 > [!TIP]
 > If you face service connectivity issues on Windows, try replacing "localhost" with "127.0.0.1" globally
 
@@ -84,6 +98,8 @@ Copy `.env.example` to `.env` to override defaults; `make` and `docker compose` 
 | `HOST` | `127.0.0.1` | Dev server bind address (`0.0.0.0` to accept outside connections) |
 | `PORT` | `5000` | Dev server port |
 | `FLASK_DEBUG` | `0` | `1` enables the Flask debugger (never in production) |
+| `MAX_UPLOAD_BYTES` | `10485760` (10 MB) | Larger uploads are rejected with `413` |
+| `DEBUG_IMAGES` | `0` | `1` saves each image with its prediction boxes drawn to `tmp/debug/` |
 | `TFS_HOST` | `localhost` | TF Serving host |
 | `TFS_PORT` | `8501` | TF Serving REST port |
 | `MODEL_NAME` | `ssd_mobilenet_v2` | Model name in TF Serving |
@@ -92,6 +108,7 @@ Copy `.env.example` to `.env` to override defaults; `make` and `docker compose` 
 | `MONGO_HOST` | `localhost` | MongoDB host |
 | `MONGO_PORT` | `27017` | MongoDB port |
 | `MONGO_DB` | `prod_counter` | MongoDB database |
+| `MONGO_TIMEOUT` | `5` | Seconds to wait for MongoDB before returning `503` |
 | `POSTGRES_HOST` | `localhost` | PostgreSQL host |
 | `POSTGRES_PORT` | `5432` | PostgreSQL port |
 | `POSTGRES_DB` | `counter` | PostgreSQL database |
