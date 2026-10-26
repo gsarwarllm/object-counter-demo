@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from counter.domain.actions import CountDetectedObjects
+from counter.domain.actions import CountDetectedObjects, DetectObjects
 from counter.domain.models import ObjectCount
 from tests.domain.helpers import generate_prediction
 
@@ -31,3 +31,23 @@ class TestCountDetectedObjects:
         CountDetectedObjects(object_detector, count_object_repo).execute(None, 0)
         count_object_repo.update_values.assert_called_with(
             [ObjectCount('cat', 2), ObjectCount('dog', 2), ObjectCount('rabbit', 1)])
+
+
+class TestDetectObjects:
+    @pytest.fixture
+    def object_detector(self) -> Mock:
+        object_detector = Mock()
+        object_detector.predict.return_value = [generate_prediction('dog', 0.6),
+                                                generate_prediction('cat', 0.4),
+                                                generate_prediction('cat', 0.9),
+                                                generate_prediction('rabbit', 0.5)]
+        return object_detector
+
+    def test_returns_predictions_over_threshold_sorted_by_score(self, object_detector) -> None:
+        predictions = DetectObjects(object_detector).execute(None, 0.5)
+        assert predictions == [generate_prediction('cat', 0.9),
+                               generate_prediction('dog', 0.6),
+                               generate_prediction('rabbit', 0.5)]
+
+    def test_returns_empty_list_when_nothing_over_threshold(self, object_detector) -> None:
+        assert DetectObjects(object_detector).execute(None, 0.95) == []

@@ -8,6 +8,10 @@ def over_threshold(predictions: List[Prediction], threshold: float):
     return filter(lambda prediction: prediction.score >= threshold, predictions)
 
 
+def sort_by_score(predictions: List[Prediction]) -> List[Prediction]:
+    return sorted(predictions, key=lambda prediction: prediction.score, reverse=True)
+
+
 def count(predictions: List[Prediction]) -> List[ObjectCount]:
     object_classes = map(lambda prediction: prediction.class_name, predictions)
     object_classes_counter = reduce(__count_object_classes, object_classes, {})

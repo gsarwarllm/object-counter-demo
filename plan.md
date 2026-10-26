@@ -451,6 +451,14 @@ Proposed in M3; these are the ones to implement.
 
 **Goal:** `POST /object-predictions` per section 5.5.
 
+**Why POST, although the endpoint is read-only**
+- The request carries an image. A GET body has no defined semantics (RFC 9110), and proxies, CDNs and clients such as `fetch` may drop it or reject it.
+- A base64 image doesn't fit in a URL (limits are about 2–8 KB) and would end up in access logs.
+- `multipart/form-data` uploads use POST, the same as `/object-count`, so both endpoints share one input format.
+- Trade-off: POST doesn't signal that the endpoint is safe, so responses aren't cached or retried automatically. The OpenAPI spec and section 5.5 document that it is side-effect free and idempotent.
+- Alternatives rejected: `GET ?image_url=` (server-side fetch is an SSRF risk and adds latency), the HTTP `QUERY` method (draft, not widely supported), `PUT` (wrong meaning: it stores a resource).
+- Precedent: TF Serving's `:predict` endpoint, which this app calls, is also POST.
+
 **Code changes**
 
 | File | Change |
@@ -465,12 +473,18 @@ Proposed in M3; these are the ones to implement.
 | `tests/entrypoints/test_webapp.py` | API tests: 200 shape, 400 cases, no repo writes |
 | `README.md` | curl example |
 
-**Steps**
-1. Write the unit tests for `DetectObjects` (filtering, sorting, empty result, no repo used).
-2. Implement `DetectObjects` and refactor `CountDetectedObjects` to share the filtering.
-3. Add the route using the I1 validation helpers.
-4. Write the API tests, including "totals unchanged after calling `/object-predictions`".
-5. Update the OpenAPI spec and README.
+**Implementation steps** (each step is one commit and leaves `pytest` green; branch `feat/m1-predictions-endpoint`)
+
+| # | Step | Files | Tests | Done when |
+|---|---|---|---|---|
+| M1.1 | Add pure `sort_by_score(predictions)` (score descending, stable) | `counter/domain/predictions.py` | `tests/domain/test_predictions.py`: sorted order, ties keep input order, empty list | unit tests pass |
+| M1.2 | Extract shared `detect_over_threshold(detector, image, threshold)` and have `CountDetectedObjects` use it (no behaviour change) | `counter/domain/actions.py` | existing `test_actions.py` passes unchanged | refactor only, same outputs |
+| M1.3 | Add `DetectObjects(object_detector)` with `execute(image, threshold) -> List[Prediction]` (filter + sort, no repo) | `counter/domain/actions.py` | `test_actions.py`: filtering, inclusive `>=`, sorting, empty result, no repo dependency | unit tests pass (write them first) |
+| M1.4 | Wire it in the composition root: build the detector once, add `get_detect_action()` | `counter/config.py` | `pytest` still green | both actions share one detector instance |
+| M1.5 | Add request/response helpers: `parse_predictions_request`, `to_predictions_response_dto` (`{threshold, count, predictions[]}`) | `counter/entrypoints/schemas.py` (new) | unit tests for parsing and DTO shape | helpers tested in isolation |
+| M1.6 | Add route `POST /object-predictions` | `counter/entrypoints/webapp.py` | `test_webapp.py`: 200 shape, sorted, threshold filtering, totals unchanged after the call | curl example returns 200 |
+| M1.7 | Validation errors: missing file, bad or out-of-range threshold, non-image → 400 problem+json. Uses I1's helpers if M4 is done; otherwise minimal checks here, replaced by I1 later | `schemas.py`, `webapp.py` | `test_webapp.py`: each 400 case | invalid input returns 400 problem+json |
+| M1.8 | Docs: OpenAPI path (Appendix A) and README curl example | `docs/openapi.yaml`, `README.md` | `openapi-spec-validator docs/openapi.yaml` (if M8 is set up) | spec and README match the behaviour |
 
 **Acceptance criteria**
 - [ ] `curl -F threshold=0.5 -F file=@resources/images/cat.jpg .../object-predictions` returns 200 with the `PredictionsResponse` shape.

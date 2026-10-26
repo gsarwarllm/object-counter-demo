@@ -121,6 +121,12 @@ python -m counter.entrypoints.webapp
  curl -F "threshold=0.9" -F "file=@resources/images/food.jpg" http://localhost:5000/object-count 
 ```
 
+List the predictions with a score at or above the threshold, sorted by score (doesn't update the totals):
+
+```bash
+ curl -F "threshold=0.5" -F "file=@resources/images/cat.jpg" http://localhost:5000/object-predictions
+```
+
 > [!TIP]
 > If you face service connectivity issues on Windows, try replacing "localhost" with "127.0.0.1" globally
 
