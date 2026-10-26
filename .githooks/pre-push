@@ -1,0 +1,3 @@
+#!/bin/sh
+# Run the test suite before every push; bypass with `git push --no-verify`.
+PYTHONPATH=. ENV=dev .venv/bin/python -m pytest -q || exit 1
