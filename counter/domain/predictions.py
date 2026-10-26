@@ -1,21 +1,23 @@
 from functools import reduce
-from typing import List
 
-from counter.domain.models import Prediction, ObjectCount
+from counter.domain.models import ObjectCount, Prediction
 
 
-def over_threshold(predictions: List[Prediction], threshold: float):
+def over_threshold(predictions: list[Prediction], threshold: float):
     return filter(lambda prediction: prediction.score >= threshold, predictions)
 
 
-def sort_by_score(predictions: List[Prediction]) -> List[Prediction]:
+def sort_by_score(predictions: list[Prediction]) -> list[Prediction]:
     return sorted(predictions, key=lambda prediction: prediction.score, reverse=True)
 
 
-def count(predictions: List[Prediction]) -> List[ObjectCount]:
-    object_classes = map(lambda prediction: prediction.class_name, predictions)
+def count(predictions: list[Prediction]) -> list[ObjectCount]:
+    object_classes = (prediction.class_name for prediction in predictions)
     object_classes_counter = reduce(__count_object_classes, object_classes, {})
-    return [ObjectCount(object_class, occurrences) for object_class, occurrences in object_classes_counter.items()]
+    return [
+        ObjectCount(object_class, occurrences)
+        for object_class, occurrences in object_classes_counter.items()
+    ]
 
 
 def __count_object_classes(class_counter: dict, object_class: str):

@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import List
 
 
 @dataclass
@@ -25,5 +24,5 @@ class ObjectCount:
 
 @dataclass
 class CountResponse:
-    current_objects: List[ObjectCount]
-    total_objects: List[ObjectCount]
+    current_objects: list[ObjectCount]
+    total_objects: list[ObjectCount]

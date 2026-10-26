@@ -1,11 +1,9 @@
-from typing import List
-
 from PIL import Image
 
 from counter.debug import draw
 from counter.domain.models import CountResponse, Prediction
-from counter.domain.ports import ObjectDetector, ObjectCountRepo
-from counter.domain.predictions import over_threshold, count, sort_by_score
+from counter.domain.ports import ObjectCountRepo, ObjectDetector
+from counter.domain.predictions import count, over_threshold, sort_by_score
 
 
 class CountDetectedObjects:
@@ -25,12 +23,12 @@ class DetectObjects:
     def __init__(self, object_detector: ObjectDetector):
         self.__object_detector = object_detector
 
-    def execute(self, image, threshold) -> List[Prediction]:
+    def execute(self, image, threshold) -> list[Prediction]:
         predictions = find_valid_predictions(self.__object_detector, image, threshold)
         return sort_by_score(predictions)
 
 
-def find_valid_predictions(object_detector: ObjectDetector, image, threshold) -> List[Prediction]:
+def find_valid_predictions(object_detector: ObjectDetector, image, threshold) -> list[Prediction]:
     predictions = object_detector.predict(image)
     _debug_image(image, predictions, "all_predictions.jpg")
     valid_predictions = list(over_threshold(predictions, threshold=threshold))

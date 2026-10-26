@@ -1,21 +1,20 @@
 from abc import ABC, abstractmethod
-from typing import BinaryIO, List, Dict
+from typing import BinaryIO
 
-from counter.domain.models import Prediction, ObjectCount
+from counter.domain.models import ObjectCount, Prediction
 
 
 class ObjectDetector(ABC):
     @abstractmethod
-    def predict(self, image: BinaryIO) -> List[Prediction]:
+    def predict(self, image: BinaryIO) -> list[Prediction]:
         raise NotImplementedError
 
 
 class ObjectCountRepo(ABC):
     @abstractmethod
-    def read_values(self, object_classes: List[str] = None) -> List[ObjectCount]:
+    def read_values(self, object_classes: list[str] | None = None) -> list[ObjectCount]:
         raise NotImplementedError
 
     @abstractmethod
-    def update_values(self, new_values: List[ObjectCount]):
+    def update_values(self, new_values: list[ObjectCount]):
         raise NotImplementedError
-
