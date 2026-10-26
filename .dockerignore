@@ -11,3 +11,4 @@ tests
 spikes
 *.pdf
 .env
+.venv-models

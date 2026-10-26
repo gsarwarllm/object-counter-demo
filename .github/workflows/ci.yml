@@ -15,7 +15,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python -m pytest -q -m "not integration"
+      - run: python -m pytest -q -m "not integration and not models"
         env:
           ENV: dev
 
@@ -33,6 +33,20 @@ jobs:
       - run: |
           python -m pytest -q -m integration -rs | tee pytest.log
           ! grep -q SKIPPED pytest.log
+        env:
+          ENV: dev
+
+  models:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt -r requirements-models.txt
+      # Model registry scripts against a temporary MLflow registry (dummy model, no downloads)
+      - run: python -m pytest -q -m models -rs
         env:
           ENV: dev
 
@@ -59,6 +73,7 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: bandit -c pyproject.toml -r .
       - run: pip-audit -r requirements.txt
+      - run: pip-audit -r requirements-models.txt
 
   docker:
     runs-on: ubuntu-latest

@@ -5,6 +5,7 @@ from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from counter import config
+from counter.adapters.detector_registry import DetectorRegistry
 from counter.domain.actions import CountDetectedObjects, DetectObjects
 from counter.domain.errors import (
     DetectorUnavailableError,
@@ -12,37 +13,67 @@ from counter.domain.errors import (
     RepositoryUnavailableError,
     ValidationError,
 )
-from counter.entrypoints.schemas import parse_image_request, to_predictions_response_dto
+from counter.domain.ports import ObjectCountRepo
+from counter.entrypoints.schemas import (
+    parse_image_request,
+    to_count_response_dto,
+    to_model_dto,
+    to_models_response_dto,
+    to_predictions_response_dto,
+)
 
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
 def create_app(
-    count_action: CountDetectedObjects | None = None,
-    detect_action: DetectObjects | None = None,
+    detectors: DetectorRegistry | None = None,
+    count_repo: ObjectCountRepo | None = None,
 ):
-    """Builds the app; actions default to the ones configured by env vars (see config.py)."""
+    """Builds the app; dependencies default to the ones configured by env vars (config.py)."""
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = int(
         os.environ.get("MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES)
     )
+    detectors = detectors or config.get_detector_registry()
+    count_repo = count_repo or config.get_count_repo()
+    debug_image_writer = config.get_debug_image_writer()
 
-    if count_action is None or detect_action is None:
-        object_detector = config.get_object_detector()
-        count_action = count_action or config.get_count_action(object_detector)
-        detect_action = detect_action or config.get_detect_action(object_detector)
+    # One pair of use cases per model; all models share the count store.
+    count_actions = {
+        model.name: CountDetectedObjects(model.detector, count_repo, debug_image_writer)
+        for model in detectors.models
+    }
+    detect_actions = {
+        model.name: DetectObjects(model.detector, debug_image_writer) for model in detectors.models
+    }
 
     @app.route("/object-count", methods=["POST"])
     def object_count():
-        image_request = parse_image_request(request.form, request.files)
-        count_response = count_action.execute(image_request.image, image_request.threshold)
-        return jsonify(count_response)
+        image_request = parse_image_request(request.form, request.files, detectors.names)
+        model = detectors.get(image_request.model_name)
+        count_response = count_actions[model.name].execute(
+            image_request.image, image_request.threshold
+        )
+        return jsonify(
+            to_count_response_dto(count_response, to_model_dto(model.name, model.version))
+        )
 
     @app.route("/object-predictions", methods=["POST"])
     def object_predictions():
-        image_request = parse_image_request(request.form, request.files)
-        predictions = detect_action.execute(image_request.image, image_request.threshold)
-        return jsonify(to_predictions_response_dto(image_request.threshold, predictions))
+        image_request = parse_image_request(request.form, request.files, detectors.names)
+        model = detectors.get(image_request.model_name)
+        predictions = detect_actions[model.name].execute(
+            image_request.image, image_request.threshold
+        )
+        return jsonify(
+            to_predictions_response_dto(
+                image_request.threshold, predictions, to_model_dto(model.name, model.version)
+            )
+        )
+
+    @app.route("/models", methods=["GET"])
+    def list_models():
+        return jsonify(to_models_response_dto(detectors))
 
     register_error_handlers(app)
     return app

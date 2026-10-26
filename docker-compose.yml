@@ -48,7 +48,7 @@ services:
       ENV: prod
       TFS_HOST: tfserving
       TFS_PORT: "8501"
-      MODEL_NAME: ${MODEL_NAME:-ssd_mobilenet_v2}
+      MODELS_LOCK: /app/tmp/model/models.lock.json
       TFS_TIMEOUT: ${TFS_TIMEOUT:-30}
       MONGO_HOST: mongo
       MONGO_PORT: "27017"
@@ -61,6 +61,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-counter}
     ports:
       - "5000:5000"
+    volumes:
+      # Which model versions to call, written by `make pull-models`
+      - ./tmp/model/models.lock.json:/app/tmp/model/models.lock.json:ro
     depends_on:
       tfserving:
         condition: service_healthy

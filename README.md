@@ -12,8 +12,7 @@ The application is composed of three layers:
 
 - **domain**: Business logic. It is responsible for orchestrating the calls to the external services and for applying the business rules.
 
-The model used in this example has been taken from
-[Kaggle](https://www.kaggle.com/models/google/mobilenet-v2/tensorFlow1/openimages-v4-ssd-mobilenet-v2/1)
+The models come from Google's [TensorFlow 1 Object Detection model zoo](https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/tf1_detection_zoo.md): SSD MobileNet v2 (COCO, the default) and SSDLite MobileNet v2 (COCO), which stands in for an internally trained model. They're listed in [`models/models.json`](models/models.json); see [Models](#models).
 
 ## Requirements
 
@@ -34,10 +33,11 @@ make run     # dev server on http://127.0.0.1:5000
 
 Run `make help` to list every target.
 
-## Run with the real model (Docker)
+## Run with the real models (Docker)
 
 ```bash
-make download-model   # SSD MobileNet v2 into tmp/model (skips if already there)
+make setup-models     # once: .venv-models with MLflow (~640 MB)
+make models           # download, publish to the local MLflow registry, pull for TF Serving
 make up               # TF Serving, MongoDB and PostgreSQL, waits until healthy
 make run-prod         # app on :5000 against those services
 make down             # stop the services when done
@@ -55,6 +55,29 @@ COUNT_REPO=postgres make run-prod
 
 The table `object_counts` is created on first use (schema in `counter/adapters/sql/001_object_counts.sql`). Increments use `INSERT ... ON CONFLICT DO UPDATE`, so concurrent requests don't lose updates. If the database is down, `/object-count` returns `503` (problem+json) and `/object-predictions` keeps working.
 
+## Models
+
+Several models can be served side by side. The app never downloads from a public URL at runtime: models go through a **model registry**, here a local [MLflow](https://mlflow.org/) registry (SQLite + a folder under `tmp/mlflow/`) standing in for a private company registry.
+
+```
+models/models.json ──> make download-models ──> tmp/downloads/<name>/        (stand-in for training output)
+                       make publish-models  ──> MLflow registry: <name> v1, v2, ... + alias "champion"
+                       make pull-models     ──> tmp/model/<name>/<version>/ + model_config.config + models.lock.json
+                       make up / run-prod   ──> TF Serving serves the pinned versions; the app calls them
+```
+
+| Model | Source | Role |
+|---|---|---|
+| `ssd_mobilenet_v2` (default) | SSD MobileNet v2 COCO, 2018-03-29 | The original model of this project |
+| `acme_shelf_detector` | SSDLite MobileNet v2 COCO, 2018-05-09 (49 MB) | Simulated internal model: public weights published under an internal name. Its label map is a copy of COCO. |
+
+- **Adding a model:** add an entry to `models/models.json` (name, serving type, registry alias, label map, source) and its label map under `models/labels/`, then `make models`. No code changes.
+- **Releasing or rolling back a version:** `make promote-model MODEL=acme_shelf_detector VERSION=2`, then `make pull-models` and restart. Publishing a new version doesn't serve it until it's promoted.
+- **Browsing the registry:** `make mlflow-ui`, then open http://127.0.0.1:5001.
+- **Private registry:** set `MLFLOW_TRACKING_URI` to your MLflow server (with its credentials); the same commands work.
+
+In dev (`ENV=dev`), every model in the manifest is served by the fake detector, so model selection works without Docker.
+
 ## Call the service
 
 Count objects and update the running totals:
@@ -71,11 +94,19 @@ List the predictions with a score at or above the threshold, sorted by score (do
 curl -F "threshold=0.5" -F "file=@resources/images/cat.jpg" http://localhost:5000/object-predictions
 ```
 
-Both endpoints take `threshold` (optional, `0`–`1`, default `0.5`, inclusive) and `file` (JPEG or PNG). Errors are returned as [RFC 7807](https://www.rfc-editor.org/rfc/rfc7807) `application/problem+json`:
+Use another model with `model_name`, and list the available models with `GET /models`:
+
+```bash
+curl -F "threshold=0.5" -F "model_name=acme_shelf_detector" -F "file=@resources/images/cat.jpg" http://localhost:5000/object-predictions
+curl http://localhost:5000/models
+# {"default_model": "ssd_mobilenet_v2", "models": [{"name": "acme_shelf_detector", "version": "1"}, {"name": "ssd_mobilenet_v2", "version": "1"}]}
+```
+
+Both endpoints take `threshold` (optional, `0`–`1`, default `0.5`, inclusive), `file` (JPEG or PNG) and `model_name` (optional, default: the manifest's `default_model`). Responses include the model that answered, e.g. `"model": {"name": "ssd_mobilenet_v2", "version": "1"}` (`version` is `null` in dev). All models add to the same running totals. Errors are returned as [RFC 7807](https://www.rfc-editor.org/rfc/rfc7807) `application/problem+json`:
 
 | Status | When |
 |---|---|
-| `400` | Missing `file`, `threshold` not a number or outside `0`–`1` (`errors` names the field), or a file that isn't a JPEG/PNG image |
+| `400` | Missing `file`, `threshold` not a number or outside `0`–`1`, unknown `model_name` (`errors` names the field and lists the models), or a file that isn't a JPEG/PNG image |
 | `413` | Upload larger than `MAX_UPLOAD_BYTES` |
 | `503` | TF Serving or the count database is unreachable |
 | `500` | Unexpected error (details are logged, not returned) |
@@ -94,7 +125,7 @@ Copy `.env.example` to `.env` to override defaults; `make` and `docker compose` 
 
 | Variable | Default | Used for |
 |---|---|---|
-| `ENV` | `dev` | `dev`: fake detector + in-memory counts. `prod`: TF Serving + MongoDB |
+| `ENV` | `dev` | `dev`: fake detectors + in-memory counts. `prod`: TF Serving + MongoDB |
 | `HOST` | `127.0.0.1` | Dev server bind address (`0.0.0.0` to accept outside connections) |
 | `PORT` | `5000` | Dev server port |
 | `FLASK_DEBUG` | `0` | `1` enables the Flask debugger (never in production) |
@@ -102,7 +133,10 @@ Copy `.env.example` to `.env` to override defaults; `make` and `docker compose` 
 | `DEBUG_IMAGES` | `0` | `1` saves each image with its prediction boxes drawn to `tmp/debug/` |
 | `TFS_HOST` | `localhost` | TF Serving host |
 | `TFS_PORT` | `8501` | TF Serving REST port |
-| `MODEL_NAME` | `ssd_mobilenet_v2` | Model name in TF Serving |
+| `MODELS_MANIFEST` | `models/models.json` | Which models exist, the default, their label maps and registry aliases |
+| `MODELS_LOCK` | `tmp/model/models.lock.json` | Model versions pulled by `make pull-models`; `ENV=prod` calls exactly these and won't start without them |
+| `MLFLOW_TRACKING_URI` | `sqlite:///tmp/mlflow/registry.db` | Model registry used by the `make *-models` targets; point it at a company MLflow server to use a private registry |
+| `MLFLOW_ARTIFACTS_DIR` | `tmp/mlflow/artifacts` | Where a new local registry stores model files |
 | `TFS_TIMEOUT` | `30` | Seconds to wait for a TF Serving response |
 | `COUNT_REPO` | `memory` (dev), `mongo` (prod) | Count store: `memory`, `mongo` or `postgres` |
 | `MONGO_HOST` | `localhost` | MongoDB host |
@@ -124,11 +158,12 @@ Copy `.env.example` to `.env` to override defaults; `make` and `docker compose` 
 |---|---|
 | `make test` | Unit and API tests, no Docker needed |
 | `make test-integration` | Repo tests against real PostgreSQL and MongoDB, started with testcontainers (needs Docker, or set `TEST_POSTGRES_DSN` / `TEST_MONGO_HOST`) |
+| `make test-models` | Model registry scripts against a temporary MLflow registry (needs `make setup-models`) |
 | `make lint` / `make format` | ruff check / apply fixes and formatting |
 | `make security` | bandit and pip-audit |
 | `make check` | lint + security + tests, the same as CI |
 
-CI (`.github/workflows/ci.yml`) runs the test, integration, lint, security and docker jobs on every pull request.
+CI (`.github/workflows/ci.yml`) runs the test, integration, models, lint, security and docker jobs on every pull request.
 
 The same repo tests run against every `ObjectCountRepo` adapter (memory, MongoDB, PostgreSQL), so all of them behave the same way (`tests/adapters/test_count_repo_contract.py`).
 
@@ -141,10 +176,10 @@ uv venv --python 3.12 .venv
 .venv\Scripts\Activate.ps1
 uv pip install -r requirements-dev.txt
 
-python -m pytest -m "not integration"     # make test
+python -m pytest -m "not integration and not models"     # make test
 python -m counter.entrypoints.webapp      # make run
 docker compose up -d --wait               # make up
 $env:ENV = "prod"; python -m counter.entrypoints.webapp   # make run-prod
 ```
 
-Download the model by following the steps in `scripts/download_model.sh`, or run it from Git Bash or WSL.
+Models (`make models`): run `python scripts/model_registry.py download`, then `publish` and `pull` with the Python from a venv that has `requirements-models.txt` installed.

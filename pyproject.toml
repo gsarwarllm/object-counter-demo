@@ -9,6 +9,7 @@ pythonpath = ["."]
 testpaths = ["tests"]
 markers = [
     "integration: needs Docker (real databases via testcontainers)",
+    "models: needs MLflow (requirements-models.txt): model registry scripts",
 ]
 
 [tool.ruff]

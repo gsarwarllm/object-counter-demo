@@ -151,7 +151,7 @@ these before or during the interview.
 | A16 | API versioning | None | Keep current paths (backwards compatible). A `/v1` prefix is optional later. |
 | A17 | Task 3/5/6b deliverable | Code or text? Where? | Written answers in `docs/ANSWERS.md`, linked from `README.md` |
 | A18 | Task 6 choice | (a) or (b) | Implement (a); outline (b) in `docs/ANSWERS.md` |
-| A19 | `model_name` field | Sent by `test_webapp.py`, ignored by the app | Ignored for now; becomes an optional, validated field in M5 |
+| A19 | `model_name` field | Sent by `test_webapp.py`, ignored by the app | Optional, validated field since M5: one of the models in `models/models.json` (listed by `GET /models`), default = the manifest's `default_model` |
 | A20 | Windows support | README has PowerShell commands; a Makefile is Unix-only | Makefile + docker compose for Unix/WSL; keep the PowerShell notes in the README |
 | A21 | Debug images | Written to the CWD on every request unless `python -O` | Off by default; `DEBUG_IMAGES=true` writes to `tmp/debug/` |
 | A22 | Python version | README says ">= 3.10"; 3.14 fails | Pin **3.12** (`.python-version`, `pyproject.toml`) |
@@ -212,8 +212,10 @@ same JSON. The source of truth is `docs/openapi.yaml` (Appendix A).
 | `Box` | `xmin`, `ymin`, `xmax`, `ymax`: number | each in `[0, 1]`; `xmin <= xmax`, `ymin <= ymax` |
 | `Prediction` | `class_name`: string, `score`: number, `box`: `Box` | `score` in `[0, 1]` |
 | `ObjectCount` | `object_class`: string, `count`: integer | `count >= 0` |
-| `CountResponse` | `current_objects`: `ObjectCount[]`, `total_objects`: `ObjectCount[]` | arrays may be empty; sorted per A6 |
-| `PredictionsResponse` | `threshold`: number, `count`: integer, `predictions`: `Prediction[]` | `count == len(predictions)`; sorted per A5 |
+| `Model` | `name`: string, `version`: string or null | the model that answered; `version` is the pulled registry version (`null` in dev, where fakes answer) |
+| `CountResponse` | `current_objects`: `ObjectCount[]`, `total_objects`: `ObjectCount[]`, `model`: `Model` | arrays may be empty; sorted per A6 |
+| `PredictionsResponse` | `threshold`: number, `count`: integer, `predictions`: `Prediction[]`, `model`: `Model` | `count == len(predictions)`; sorted per A5 |
+| `ModelsResponse` | `default_model`: string, `models`: `Model[]` | models sorted by name |
 | `Problem` (error) | `type`: uri, `title`: string, `status`: integer, `detail`: string, `instance`: string, `errors`: `FieldError[]` (optional) | RFC 7807 |
 | `FieldError` | `field`: string, `message`: string | one entry per invalid field |
 
@@ -223,7 +225,7 @@ Request DTO (the same for both image endpoints):
 |---|---|---|---|---|---|---|
 | `file` | form part | binary | yes | n/a | present, non-empty, ≤ 10 MB, decodable as JPEG/PNG | 400 (`missing`/`invalid image`), 413 (too large) |
 | `threshold` | form field | number | no | `0.5` | parses as float, `0.0 <= t <= 1.0` | 400 |
-| `model_name` | form field | string | no | configured default | must exist in the model registry (only after M5 is implemented) | 400 (`unknown model`) |
+| `model_name` | form field | string | no | the manifest's `default_model` | one of the models in `models/models.json` (see `GET /models`); empty = default | 400 (`unknown model`, lists the available models) |
 
 Domain mapping (the domain stays free of HTTP and framework types):
 
@@ -278,7 +280,8 @@ curl -F "threshold=0.9" -F "file=@resources/images/boy.jpg" http://localhost:500
 ```json
 {
   "current_objects": [ { "object_class": "person", "count": 1 } ],
-  "total_objects":   [ { "object_class": "cat", "count": 3 }, { "object_class": "person", "count": 1 } ]
+  "total_objects":   [ { "object_class": "cat", "count": 3 }, { "object_class": "person", "count": 1 } ],
+  "model": { "name": "ssd_mobilenet_v2", "version": "1" }
 }
 ```
 
@@ -326,7 +329,8 @@ curl -F "threshold=0.5" -F "file=@resources/images/cat.jpg" http://localhost:500
       "score": 0.9991,
       "box": { "xmin": 0.3673, "ymin": 0.2783, "xmax": 0.7358, "ymax": 0.6989 }
     }
-  ]
+  ],
+  "model": { "name": "ssd_mobilenet_v2", "version": "1" }
 }
 ```
 
@@ -346,6 +350,28 @@ Client ─ multipart(file, threshold) ─> webapp route /object-predictions
 ```
 
 **Side effects:** none. Idempotent and safe to retry.
+
+### 5.5a `GET /models` (M5: lists the served models)
+
+**Purpose:** tell clients which values `model_name` accepts and which model answers by default.
+
+```bash
+curl http://localhost:5000/models
+```
+
+**Response 200** (`ModelsResponse`)
+
+```json
+{
+  "default_model": "ssd_mobilenet_v2",
+  "models": [
+    { "name": "acme_shelf_detector", "version": "1" },
+    { "name": "ssd_mobilenet_v2", "version": "1" }
+  ]
+}
+```
+
+**Status codes:** 200. **Side effects:** none.
 
 ### 5.6 Optional endpoints (O2)
 
@@ -573,33 +599,48 @@ Deliverable: a section in `docs/ANSWERS.md`. The items implemented in M4 are mar
 - [ ] Every proposal states the problem, the impact and the proposed fix.
 - [ ] Implemented items are linked to the files or commits that implement them.
 
-### M5: Multiple internal (private) models: setup changes (P1, written; partial implementation optional)
+### M5: Multiple internal (private) models: setup changes (P1, written + implemented)
 
-Deliverable: a section in `docs/ANSWERS.md`. Optionally implement steps 4–5.
+Deliverable: the Task 5 section in `docs/ANSWERS.md`, plus a working implementation (decided
+with the user: written answer and a small implementation, local MLflow as the model registry).
 
-1. **Model storage:** stop downloading from a public URL. Keep versioned models in a private
-   store (S3/GCS/Azure Blob, MLflow Model Registry, or an internal Artifactory).
-   `make download-model` pulls with credentials from env vars or a secrets manager, never
-   committed.
-2. **Serving several models:** run TF Serving with
-   `--model_config_file=/models/model_config.config` listing each model (name, `base_path`,
-   version policy). TF Serving can also load directly from `s3://` or `gs://`.
-3. **Per-model metadata:** each model has a `model.yaml` (name, version, framework, label-map
-   file, input size, box format). Today `mscoco_label_map.json` is hard-coded.
-4. **Model selection per request:** optional `model_name` (and `model_version`) form field,
-   validated against the registry (400 if unknown); documented in OpenAPI.
-5. **Registry in code:** replace the single detector in `config.py` with a `DetectorRegistry`
-   that builds and caches one `ObjectDetector` per model from `model.yaml`.
-6. **Configuration:** a single settings object (`pydantic-settings`) instead of scattered
-   `os.environ.get` calls.
-7. **Security and CI:** private Docker registry; CI pulls models with a service account;
-   never bake proprietary weights into public images; licence/usage notes per model.
-8. **Traceability:** pin model versions (not "latest"); return `model_name`/`model_version`
-   in responses; optionally store counts per model (A11).
+**Decisions**
+- **Registry:** a local MLflow Model Registry (SQLite `tmp/mlflow/registry.db` + artifact folder
+  `tmp/mlflow/artifacts/`) stands in for a private company registry. MLflow is a setup-time
+  tool only (own venv `.venv-models`, `requirements-models.txt`, `mlflow==3.17.2`); the app and
+  TF Serving never call it. `mlflow-skinny` can't host a SQLite registry and MLflow 3's file
+  backend is deprecated, hence the full package. MLflow 3's `register_model("runs:/...")` only
+  accepts logged models, so versions are created with `MlflowClient.create_model_version`.
+- **Models:** `ssd_mobilenet_v2` (the original SSD MobileNet v2 COCO, default) and
+  `acme_shelf_detector` (public SSDLite MobileNet v2 COCO, 49 MB, published under an internal
+  name to simulate an internal model; label map is a copy of COCO). Both from the official TF1
+  detection model zoo, same SavedModel layout.
+- **Patterns:** Strategy (`ObjectDetector` port), Factory (`DetectorFactory`, keyed by the
+  manifest's `serving` type), Registry (`DetectorRegistry`). The domain doesn't change.
+- **Selection:** optional `model_name` form field on both endpoints, not an endpoint per model;
+  `GET /models`; responses include `model: {name, version}`. All models share the count store.
+- **No automatic fallback model:** a missing model fails at startup; an unreachable one is 503.
+
+**What was built**
+
+| Step | Files |
+|---|---|
+| M5.1 Manifest + per-model label maps (moved `mscoco_label_map.json` to `models/labels/mscoco.json`) | `models/models.json`, `models/labels/`, `counter/adapters/model_manifest.py` |
+| M5.2 Detector factory + label-map injection + version-pinned TF Serving URLs | `counter/adapters/detector_factory.py`, `object_detector.py` |
+| M5.3 Detector registry; config builds it from manifest + `models.lock.json` (prod fails fast without pulled versions) | `counter/adapters/detector_registry.py`, `counter/config.py` |
+| M5.4 `model_name`, `model` in responses, `GET /models`; CLI takes an optional model name | `counter/entrypoints/webapp.py`, `schemas.py`, `main.py` |
+| M5.5 Registry workflow: `download` → `publish` (SHA-256 dedup, alias on first version) → `pull` (TF Serving layout, generated `model_config.config` with pinned versions, lock file); `promote`; Make targets incl. `mlflow-ui` | `scripts/model_registry.py`, `Makefile`, `requirements-models.txt` (replaces `scripts/download_model.sh`; `model_config.config` is now generated, no longer tracked) |
+| M5.6 Docker/CI: image ships `models/`; compose mounts the lock file; CI `models` job; `pip-audit` covers MLflow | `Dockerfile`, `docker-compose.yml`, `.github/workflows/ci.yml` |
+| M5.7 Tests | `tests/adapters/test_models.py`, `tests/scripts/test_model_registry.py`, `test_webapp.py`, `test_config.py` |
+| M5.8 Written answer | `docs/ANSWERS.md` (Task 5) |
 
 **Acceptance criteria**
-- [ ] The answer covers storage, access control, serving, per-model metadata, selection, configuration and versioning.
-- [ ] If implemented: `model_name=unknown` → 400; two models configured in compose can both be called.
+- [x] The answer covers storage, access control, serving, per-model metadata, selection, configuration and versioning.
+- [x] `model_name=unknown` → 400 (lists the available models).
+- [x] Two models are published, pulled and configured for TF Serving; both can be called (verified against a stub TF Serving with version-pinned URLs; real TF Serving needs Docker).
+
+**Still proposals only:** a validated settings object (`pydantic-settings`), counts per model,
+an evaluation gate before promotion, private container registry and service accounts in CI.
 
 ### M6: Testing improvements: option (a) implemented, (b) outlined (P1)
 
@@ -971,7 +1012,7 @@ object-counter-vibe-coding/
 | Shared asset | How Spring Boot uses it |
 |---|---|
 | `docs/openapi.yaml` | contract test compares `/v3/api-docs` with it |
-| `counter/adapters/mscoco_label_map.json` | copied onto the classpath by a Maven `<resource>` entry pointing at `../counter/adapters/` (no duplicate file) |
+| `models/models.json`, `models/labels/` | the same model manifest and label maps, read from `../models/` (no duplicate files) |
 | `resources/images/` | test fixtures, referenced as `../resources/images/` |
 | `docker-compose.yml` | `docker compose --profile java up` starts `app-java` with the shared infrastructure |
 | Databases | each service uses its own database name (`counter_python`, `counter_java`) so their totals and tests don't interfere |
@@ -1022,6 +1063,7 @@ servers:
 tags:
   - name: counting
   - name: predictions
+  - name: models
 
 paths:
   /object-count:
@@ -1046,6 +1088,7 @@ paths:
               example:
                 current_objects: [ { object_class: person, count: 1 } ]
                 total_objects:   [ { object_class: cat, count: 3 }, { object_class: person, count: 1 } ]
+                model: { name: ssd_mobilenet_v2, version: '1' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -1077,10 +1120,28 @@ paths:
                   - class_name: cat
                     score: 0.9991
                     box: { xmin: 0.3673, ymin: 0.2783, xmax: 0.7358, ymax: 0.6989 }
+                model: { name: ssd_mobilenet_v2, version: '1' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '500': { $ref: '#/components/responses/InternalError' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /models:
+    get:
+      tags: [models]
+      operationId: listModels
+      summary: List the models that model_name accepts
+      responses:
+        '200':
+          description: Served models and the default one
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelsResponse' }
+              example:
+                default_model: ssd_mobilenet_v2
+                models:
+                  - { name: acme_shelf_detector, version: '1' }
+                  - { name: ssd_mobilenet_v2, version: '1' }
 
 components:
   schemas:
@@ -1101,7 +1162,8 @@ components:
           description: Minimum confidence score (inclusive)
         model_name:
           type: string
-          description: Optional model to use (available after Task 5 is implemented)
+          description: Model to use (see GET /models); empty or missing means the default model
+          example: acme_shelf_detector
     Box:
       type: object
       description: Bounding box, coordinates normalised to [0, 1]
@@ -1124,9 +1186,28 @@ components:
       properties:
         object_class: { type: string, example: cat }
         count: { type: integer, minimum: 0, example: 2 }
+    Model:
+      type: object
+      description: The model that produced a response
+      required: [name, version]
+      properties:
+        name: { type: string, example: ssd_mobilenet_v2 }
+        version:
+          type: string
+          nullable: true
+          description: Registry version served by TF Serving; null in dev (fake detectors)
+          example: '1'
+    ModelsResponse:
+      type: object
+      required: [default_model, models]
+      properties:
+        default_model: { type: string, example: ssd_mobilenet_v2 }
+        models:
+          type: array
+          items: { $ref: '#/components/schemas/Model' }
     CountResponse:
       type: object
-      required: [current_objects, total_objects]
+      required: [current_objects, total_objects, model]
       properties:
         current_objects:
           type: array
@@ -1134,15 +1215,17 @@ components:
         total_objects:
           type: array
           items: { $ref: '#/components/schemas/ObjectCount' }
+        model: { $ref: '#/components/schemas/Model' }
     PredictionsResponse:
       type: object
-      required: [threshold, count, predictions]
+      required: [threshold, count, predictions, model]
       properties:
         threshold: { type: number, minimum: 0, maximum: 1 }
         count: { type: integer, minimum: 0 }
         predictions:
           type: array
           items: { $ref: '#/components/schemas/Prediction' }
+        model: { $ref: '#/components/schemas/Model' }
     FieldError:
       type: object
       required: [field, message]

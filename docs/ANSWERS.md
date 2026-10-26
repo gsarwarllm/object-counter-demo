@@ -3,7 +3,8 @@
 This file answers the written parts of the assignment (`Task.md`):
 
 - [Task 3: Code review and proposed improvements](#task-3-code-review-and-proposed-improvements) (with Task 4: which improvements are implemented)
-- Task 5 (multiple internal models) and Task 6b (multiple deep-learning frameworks): to be added
+- [Task 5: Multiple internally trained models](#task-5-multiple-internally-trained-models)
+- Task 6b (multiple deep-learning frameworks): to be added
 
 ## Task 3: Code review and proposed improvements
 
@@ -17,11 +18,11 @@ I reviewed the original code (commit `1095f74`, before any of my changes) and li
 |---|---|---|---|---|
 | [API and validation](#31-api-and-validation) | 5 | 5 | 0 | 0 |
 | [Architecture and domain code](#32-architecture-and-domain-code) | 6 | 3 | 0 | 3 |
-| [Adapters](#33-adapters-tf-serving-and-mongodb) | 6 | 5 | 0 | 1 |
+| [Adapters](#33-adapters-tf-serving-and-mongodb) | 6 | 5 | 1 | 0 |
 | [Setup and documentation](#34-setup-and-documentation) | 7 | 5 | 0 | 2 |
 | [Tests](#35-tests) | 5 | 4 | 0 | 1 |
 | [CI, security and dependencies](#36-ci-security-and-dependencies) | 4 | 4 | 0 | 0 |
-| **Total** | **33** | **26** | **0** | **7** |
+| **Total** | **33** | **26** | **1** | **6** |
 
 ### 3.1 API and validation
 
@@ -53,7 +54,7 @@ I reviewed the original code (commit `1095f74`, before any of my changes) and li
 | R14 | `CountMongoDBRepo` creates a new `MongoClient` on every read and write. | A new connection pool per call: slow, and can exhaust connections under load. Mongo errors become 500s. | Create the client once; set `serverSelectionTimeoutMS`; wrap `PyMongoError` in `RepositoryUnavailableError` → 503. | ✅ [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11): one client per repo, `MONGO_TIMEOUT`, `PyMongoError` → 503 ([`count_repo.py`](../counter/adapters/count_repo.py)) |
 | R15 | Resource files are opened by CWD-relative paths (`counter/adapters/mscoco_label_map.json`, `counter/resources/arial.ttf`). | The app only works when started from the repo root. | Resolve paths from `Path(__file__).parent`. | ✅ [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11): label map and font resolved from `__file__`; tested from another working directory |
 | R16 | Repo adapters disagreed on edge cases: the in-memory repo returned `None` for unknown classes; the Mongo repo returned every class for an empty list. | Callers get different results depending on the configured store. | One contract test suite run against every adapter, and fix the differences. | ✅ [PR #9](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/9): [`tests/adapters/test_count_repo_contract.py`](../tests/adapters/test_count_repo_contract.py), fixes in [`count_repo.py`](../counter/adapters/count_repo.py) |
-| R17 | The REST request sends the image as a JSON array of pixel integers, and the label map is a single fixed file loaded in the constructor. | Requests are several MB of JSON per image; adding a second model with other labels needs code changes. | Use TF Serving's gRPC API or a base64 `b64` input signature; inject the label map per model (needed for Task 5). | 📋 not planned (gRPC); label map injection with Task 5 |
+| R17 | The REST request sends the image as a JSON array of pixel integers, and the label map is a single fixed file loaded in the constructor. | Requests are several MB of JSON per image; adding a second model with other labels needs code changes. | Use TF Serving's gRPC API or a base64 `b64` input signature; inject the label map per model (needed for Task 5). | 🟡 Per-model label maps: `TFSObjectDetector` gets its classes from the model manifest ([PR #13](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/13), [`detector_factory.py`](../counter/adapters/detector_factory.py)). gRPC / `b64` input not done (needs a live TF Serving to measure) |
 
 ### 3.4 Setup and documentation
 
@@ -88,16 +89,101 @@ I reviewed the original code (commit `1095f74`, before any of my changes) and li
 
 ### Task 4: implemented improvements
 
-Task 4 asks to implement at least one proposal. **26 of the 33 are implemented**: R1–R8, R12–R16, R18–R22, R25–R28 and R30–R33. Most code fixes are in [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11) (plan item M4); setup in PR #8, the PostgreSQL adapter and contract tests in PR #9, CI and security in PRs #2 and #6.
+Task 4 asks to implement at least one proposal. **26 of the 33 are implemented**: R1–R8, R12–R16, R18–R22, R25–R28 and R30–R33, and **R17 partly** (per-model label maps, with Task 5). Most code fixes are in [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11) (plan item M4); setup in PR #8, the PostgreSQL adapter and contract tests in PR #9, CI and security in PRs #2 and #6.
 
-The 7 not implemented are proposals only, or are covered by later plan items:
+The 6 not implemented, and the open part of R17, are proposals only, or are covered by later plan items:
 
 | ID | Why not (yet) |
 |---|---|
 | R9 | Small readability cleanup; no behaviour change |
 | R10 | Adding `mypy` to CI is worthwhile but out of the assignment's scope |
 | R11 | Acceptable for running totals; would need a different repo API |
-| R17 | gRPC is a performance change that needs a live TF Serving to measure; per-model label maps come with Task 5 |
+| R17 (gRPC part) | gRPC is a performance change that needs a live TF Serving to measure |
 | R23 | A lock file is a good next step for fully reproducible builds |
 | R24 | Editor configuration, not part of the application |
 | R29 | Full end-to-end tests against the compose stack are plan item M6a |
+
+## Task 5: Multiple internally trained models
+
+> If we want to use multiple models trained internally (not public), what would you change in the setup of the project?
+
+### Short answer
+
+Treat models as **versioned, private artifacts in a model registry** instead of files downloaded from a public URL. Describe each model in a **manifest** (its own label map, serving type and registry alias). Serve several models side by side with **pinned versions**, and let clients choose one per request with a `model_name` field. In code, a **factory** builds one detector per manifest entry behind the existing `ObjectDetector` port and a **registry** holds them, so adding a model is a configuration change, not a code change.
+
+I implemented this end to end ([PR #13](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/13)), with a local [MLflow](https://mlflow.org/) registry standing in for a company one.
+
+### What I implemented
+
+| Piece | What it does | Files |
+|---|---|---|
+| Model manifest | Lists the models, the default, and each one's serving type, registry alias, label map and source | [`models/models.json`](../models/models.json), [`models/labels/`](../models/labels/), [`model_manifest.py`](../counter/adapters/model_manifest.py) |
+| Registry workflow | `make models` = download → publish new versions to MLflow (identical weights are skipped by SHA-256) → pull each alias's version into TF Serving's `<name>/<version>/` layout and generate `model_config.config` and `models.lock.json`. `make promote-model` moves an alias; `make mlflow-ui` shows the registry. | [`scripts/model_registry.py`](../scripts/model_registry.py), [`Makefile`](../Makefile), [`requirements-models.txt`](../requirements-models.txt) |
+| Detector factory | Builds the `ObjectDetector` for a manifest entry from its `serving` type (`tfserving`, `fake`), with its own label map and pinned version | [`detector_factory.py`](../counter/adapters/detector_factory.py) |
+| Detector registry | One detector per model, built at startup; knows the default; in prod, refuses to start if a model has no pulled version | [`detector_registry.py`](../counter/adapters/detector_registry.py), [`config.py`](../counter/config.py) |
+| API | Optional `model_name` on `/object-count` and `/object-predictions` (unknown → 400 listing the models); responses include `"model": {"name", "version"}`; `GET /models` lists the models | [`webapp.py`](../counter/entrypoints/webapp.py), [`schemas.py`](../counter/entrypoints/schemas.py) |
+| Second model | `acme_shelf_detector`: public SSDLite MobileNet v2 weights published under an internal name, to show two models with separate versions | `models/models.json` |
+| Tests and CI | Manifest, factory, registry, model selection and `GET /models`; the registry scripts against a throwaway MLflow registry in a new CI `models` job; `pip-audit` also checks MLflow | [`tests/adapters/test_models.py`](../tests/adapters/test_models.py), [`tests/scripts/test_model_registry.py`](../tests/scripts/test_model_registry.py), [`ci.yml`](../.github/workflows/ci.yml) |
+
+```
+models/models.json ─> download ─> tmp/downloads/<name>/          (stand-in for training output)
+                      publish  ─> MLflow: <name> v1, v2, ... + alias "champion"
+                      pull     ─> tmp/model/<name>/<version>/ + model_config.config + models.lock.json
+                                   │                                  │
+                         TF Serving (pinned versions)       app: DetectorRegistry (one detector per model)
+                                   ▲                                  │
+request ─(model_name)─> use case ──┴──── ObjectDetector <─────────────┘
+```
+
+### What changes in the setup
+
+**1. Storage and access control.** Internal weights are intellectual property: they don't belong in git, in public Docker images or behind public URLs. They live in a private registry (MLflow Model Registry, or S3, GCS or Artifactory behind one) that only CI and the serving hosts can read, with credentials from a secrets manager or a cloud service account, never from the repo. Here the registry is local (`tmp/mlflow/`, git-ignored). Pointing `MLFLOW_TRACKING_URI` at a company MLflow server is the only change needed to use a real one.
+
+**2. Per-model metadata.** Each model brings its own label map, input expectations and serving type. The original code hard-coded the COCO label map inside the TF Serving adapter (finding R17). Now the manifest declares it and the factory passes it in, so a model trained on, say, shelf products with its own classes works without code changes.
+
+**3. Serving several models.** TF Serving loads every model listed in `model_config.config`. `pull` generates that file with `model_version_policy { specific { versions: N } }`, so each model serves exactly the pulled version, even if others are on disk. The app calls `/v1/models/<name>/versions/<N>:predict`, so the version that answers is the one recorded in the lock file.
+
+**4. Choosing a model per request.** A `model_name` form field, validated against the registry. Leaving it out uses the manifest's default model, so existing clients see no change. `GET /models` tells clients what's available.
+
+**5. Code structure.** The hexagonal design already had the right seam:
+
+| Pattern | Role |
+|---|---|
+| Strategy | The `ObjectDetector` port: TF Serving, the fake detector, and later other frameworks are interchangeable |
+| Factory | `DetectorFactory.create(spec, version)` picks the adapter from the manifest's `serving` type |
+| Registry | `DetectorRegistry` holds one detector per model and resolves `model_name` |
+| Composition root | `config.get_detector_registry()` wires manifest, lock file and factory together |
+
+The domain didn't change: the use cases still take one `ObjectDetector`, and the web layer builds one pair of use cases per model. Supporting another framework (Task 6b) is one adapter class plus one factory entry.
+
+**6. Versioning, promotion and rollback.** Publishing registers a new version but doesn't serve it. Releasing means moving the `champion` alias (`make promote-model MODEL=... VERSION=...`), then `make pull-models` and a restart. Rolling back is the same command with the previous version. In a team, this is where an approval or evaluation gate belongs, e.g. promote only if the new version beats the current one on a held-out data set.
+
+**7. Traceability.** Every response says which model and version produced it. Each registered version is tagged with the SHA-256 of its weights and its source, and `models.lock.json` records what's deployed.
+
+**8. Configuration.** Model settings moved from a single env var (`MODEL_NAME`) to the manifest plus `MODELS_MANIFEST`, `MODELS_LOCK` and `MLFLOW_TRACKING_URI`. A next step would be one validated settings object (e.g. `pydantic-settings`).
+
+**9. CI and security.** CI tests the registry scripts against a throwaway registry and audits MLflow's dependencies. In production, CI would pull models with a read-only service account, images would go to a private container registry, and each model would carry licence and intended-use notes.
+
+### Design decisions
+
+- **A parameter, not an endpoint per model.** Endpoints describe *what* the API does (count objects, list predictions); the model is *how*. An endpoint per model would add routes with every release, force clients to change URLs to switch or roll back, and repeat validation and documentation. A new endpoint is right only when a model does a *different task* with a different response, e.g. reading price tags.
+- **No automatic fallback model.** If a model is unavailable the API returns 503 instead of quietly answering with another model. The app persists running totals, and counts from a different model (different classes and accuracy) would corrupt them without anyone noticing. A missing model is caught at startup instead: without a pulled version, the app doesn't start.
+- **MLflow stays out of the runtime.** It's a ~640 MB dependency used only by the `make *-models` targets, in its own venv and requirements file. The app image and `requirements.txt` don't change, and replacing MLflow with another registry only touches `scripts/model_registry.py`.
+- **One shared count store.** All models add to the same totals, which keeps the repository port unchanged. If totals per model are needed, the count key becomes `(model, class)`: a repository change, not a domain or API redesign.
+
+### What is simulated, and what isn't verified
+
+- There are no real internal models here, so `acme_shelf_detector` is public SSDLite MobileNet v2 (COCO) published under an internal name. Its label map is a copy of COCO: the point is the mechanism, not the content.
+- The download step stands in for "training output". After it, everything goes through the registry.
+- Verified locally: download, publish (twice, idempotent), promote, pull, the generated TF Serving config and lock file, model selection and `GET /models` in dev, and the prod code path against a stub TF Serving.
+- Not verified: real TF Serving serving both models, because Docker isn't available on the development machine.
+
+### Try it
+
+```bash
+make setup-models && make models     # registry and pulled models
+make mlflow-ui                       # http://127.0.0.1:5001
+make up && make run-prod
+curl http://localhost:5000/models
+curl -F model_name=acme_shelf_detector -F file=@resources/images/cat.jpg http://localhost:5000/object-predictions
+```

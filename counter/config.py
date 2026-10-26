@@ -5,29 +5,35 @@ from psycopg.conninfo import make_conninfo
 
 from counter.adapters.count_repo import CountInMemoryRepo, CountMongoDBRepo, CountPostgresRepo
 from counter.adapters.debug_image_writer import FileDebugImageWriter
-from counter.adapters.object_detector import FakeObjectDetector, TFSObjectDetector
-from counter.domain.actions import CountDetectedObjects, DetectObjects
-from counter.domain.ports import DebugImageWriter, ObjectCountRepo, ObjectDetector
+from counter.adapters.detector_factory import DetectorFactory
+from counter.adapters.detector_registry import DetectorRegistry
+from counter.adapters.model_manifest import DEFAULT_LOCK, DEFAULT_MANIFEST, load_manifest, read_lock
+from counter.domain.ports import DebugImageWriter, ObjectCountRepo
 
 DEBUG_IMAGES_DIR = Path("tmp") / "debug"
+ENVS = ("dev", "prod")
 
 
-def fake_object_detector() -> ObjectDetector:
-    return FakeObjectDetector()
+def get_detector_registry() -> DetectorRegistry:
+    """One detector per model in models/models.json.
 
-
-def tfs_object_detector() -> ObjectDetector:
-    tfs_host = os.environ.get("TFS_HOST", "localhost")
-    tfs_port = int(os.environ.get("TFS_PORT", "8501"))
-    model_name = os.environ.get("MODEL_NAME", "ssd_mobilenet_v2")
-    timeout = float(os.environ.get("TFS_TIMEOUT", "30"))
-    return TFSObjectDetector(tfs_host, tfs_port, model_name, timeout)
-
-
-OBJECT_DETECTORS = {
-    "dev": fake_object_detector,
-    "prod": tfs_object_detector,
-}
+    dev: fake detectors, no TF Serving needed. prod: TF Serving, pinned to the versions
+    `make pull-models` wrote to models.lock.json (startup fails if one is missing).
+    """
+    env = _env()
+    if env not in ENVS:
+        raise ValueError(f"Unknown ENV {env!r}; expected one of {list(ENVS)}")
+    manifest = load_manifest(Path(os.environ.get("MODELS_MANIFEST", DEFAULT_MANIFEST)))
+    factory = DetectorFactory(
+        tfs_host=os.environ.get("TFS_HOST", "localhost"),
+        tfs_port=int(os.environ.get("TFS_PORT", "8501")),
+        tfs_timeout=float(os.environ.get("TFS_TIMEOUT", "30")),
+        force_serving="fake" if env == "dev" else None,
+    )
+    versions = read_lock(Path(os.environ.get("MODELS_LOCK", DEFAULT_LOCK))) if env == "prod" else {}
+    return DetectorRegistry.from_manifest(
+        manifest, factory, versions, require_versions=env == "prod"
+    )
 
 
 def memory_count_repo() -> ObjectCountRepo:
@@ -61,14 +67,6 @@ COUNT_REPOS = {
 }
 
 
-def get_object_detector() -> ObjectDetector:
-    """ENV picks the detector: dev = fake, prod = TF Serving."""
-    env = _env()
-    if env not in OBJECT_DETECTORS:
-        raise ValueError(f"Unknown ENV {env!r}; expected one of {sorted(OBJECT_DETECTORS)}")
-    return OBJECT_DETECTORS[env]()
-
-
 def get_count_repo() -> ObjectCountRepo:
     """COUNT_REPO picks the store; defaults keep the old behaviour (dev: memory, prod: mongo)."""
     default = "mongo" if _env() == "prod" else "memory"
@@ -83,18 +81,6 @@ def get_debug_image_writer() -> DebugImageWriter | None:
     if os.environ.get("DEBUG_IMAGES") == "1":
         return FileDebugImageWriter(DEBUG_IMAGES_DIR)
     return None
-
-
-def get_count_action(object_detector: ObjectDetector | None = None) -> CountDetectedObjects:
-    if object_detector is None:
-        object_detector = get_object_detector()
-    return CountDetectedObjects(object_detector, get_count_repo(), get_debug_image_writer())
-
-
-def get_detect_action(object_detector: ObjectDetector | None = None) -> DetectObjects:
-    if object_detector is None:
-        object_detector = get_object_detector()
-    return DetectObjects(object_detector, get_debug_image_writer())
 
 
 def _env() -> str:

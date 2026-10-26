@@ -1,6 +1,4 @@
-import json
 import logging
-from pathlib import Path
 from typing import BinaryIO
 
 import numpy as np
@@ -10,8 +8,6 @@ from PIL import Image, UnidentifiedImageError
 from counter.domain.errors import DetectorUnavailableError, InvalidImageError
 from counter.domain.models import Box, Prediction
 from counter.domain.ports import ObjectDetector
-
-LABEL_MAP_FILE = Path(__file__).resolve().parent / "mscoco_label_map.json"
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +24,22 @@ class FakeObjectDetector(ObjectDetector):
 
 
 class TFSObjectDetector(ObjectDetector):
-    def __init__(self, host, port, model, timeout: float = 30.0):
-        self.url = f"http://{host}:{port}/v1/models/{model}:predict"
+    """Calls TF Serving's REST API; classes maps the model's class ids to names."""
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        model: str,
+        classes: dict[int, str],
+        version: str | None = None,
+        timeout: float = 30.0,
+    ):
+        # A pinned version makes responses traceable to an exact model version.
+        version_path = f"/versions/{version}" if version else ""
+        self.url = f"http://{host}:{port}/v1/models/{model}{version_path}:predict"
         self.timeout = timeout
-        self.classes_dict = self.__build_classes_dict()
+        self.classes_dict = classes
 
     def predict(self, image: BinaryIO) -> list[Prediction]:
         np_image = self.__to_np_array(image)
@@ -48,12 +56,6 @@ class TFSObjectDetector(ObjectDetector):
             raise DetectorUnavailableError(f"TF Serving request failed: {error}") from error
         except (ValueError, KeyError, IndexError, TypeError) as error:
             raise DetectorUnavailableError(f"Unexpected TF Serving response: {error}") from error
-
-    @staticmethod
-    def __build_classes_dict():
-        with open(LABEL_MAP_FILE) as json_file:
-            labels = json.load(json_file)
-            return {label["id"]: label["display_name"] for label in labels}
 
     @staticmethod
     def __to_np_array(image: BinaryIO):

@@ -1,0 +1,21 @@
+{
+  "default_model": "ssd_mobilenet_v2",
+  "models": [
+    {
+      "name": "ssd_mobilenet_v2",
+      "description": "SSD MobileNet v2 trained on COCO (90 classes). The original model of this project.",
+      "serving": "tfserving",
+      "registry_alias": "champion",
+      "label_map": "labels/mscoco.json",
+      "source_url": "http://download.tensorflow.org/models/object_detection/ssd_mobilenet_v2_coco_2018_03_29.tar.gz"
+    },
+    {
+      "name": "acme_shelf_detector",
+      "description": "Stand-in for an internally trained model: public SSDLite MobileNet v2 (COCO) weights, published to the private registry under an internal name. Its label map is a copy of COCO.",
+      "serving": "tfserving",
+      "registry_alias": "champion",
+      "label_map": "labels/acme_shelf_detector.json",
+      "source_url": "http://download.tensorflow.org/models/object_detection/ssdlite_mobilenet_v2_coco_2018_05_09.tar.gz"
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import pytest
 import requests
 from PIL import Image
 
+from counter.adapters.model_manifest import REPO_ROOT, load_label_map
 from counter.adapters.object_detector import TFSObjectDetector
 from counter.domain.errors import DetectorUnavailableError, InvalidImageError
 from counter.domain.models import Box, Prediction
@@ -38,9 +39,12 @@ def post(monkeypatch) -> Mock:
     return post
 
 
+COCO_LABELS = load_label_map(REPO_ROOT / "models" / "labels" / "mscoco.json")
+
+
 @pytest.fixture
 def detector():
-    return TFSObjectDetector("tfs", 8501, "ssd_mobilenet_v2", timeout=7)
+    return TFSObjectDetector("tfs", 8501, "ssd_mobilenet_v2", COCO_LABELS, version="3", timeout=7)
 
 
 def sent_image(post: Mock) -> np.ndarray:
@@ -54,7 +58,7 @@ def test_maps_tf_serving_output_to_predictions(detector, post):
         Prediction("cat", 0.9, Box(xmin=0.2, ymin=0.1, xmax=0.4, ymax=0.3)),
         Prediction("cup", 0.4, Box(xmin=0.6, ymin=0.5, xmax=0.8, ymax=0.7)),
     ]
-    assert post.call_args.args[0] == "http://tfs:8501/v1/models/ssd_mobilenet_v2:predict"
+    assert post.call_args.args[0] == "http://tfs:8501/v1/models/ssd_mobilenet_v2/versions/3:predict"
     assert post.call_args.kwargs["timeout"] == 7
 
 
@@ -111,7 +115,13 @@ def test_malformed_response_raises_detector_unavailable(detector, post):
         detector.predict(png_bytes("RGB"))
 
 
-def test_works_from_any_working_directory(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
+def test_without_version_calls_the_latest_model(post):
+    TFSObjectDetector("tfs", 8501, "ssd_mobilenet_v2", COCO_LABELS).predict(png_bytes("RGB"))
 
-    assert TFSObjectDetector("tfs", 8501, "model").classes_dict[17] == "cat"
+    assert post.call_args.args[0] == "http://tfs:8501/v1/models/ssd_mobilenet_v2:predict"
+
+
+def test_uses_the_injected_label_map(post):
+    detector = TFSObjectDetector("tfs", 8501, "custom", {17: "price_tag", 47: "shelf"})
+
+    assert [p.class_name for p in detector.predict(png_bytes("RGB"))] == ["price_tag", "shelf"]
