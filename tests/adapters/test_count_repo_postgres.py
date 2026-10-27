@@ -28,6 +28,11 @@ def test_update_raises_domain_error_when_database_is_down(unreachable_repo):
         unreachable_repo.update_values([ObjectCount("cat", 1)])
 
 
+def test_not_ready_when_database_is_down(unreachable_repo):
+    with pytest.raises(RepositoryUnavailableError):
+        unreachable_repo.check_ready()
+
+
 @pytest.mark.integration
 def test_counts_persist_across_repo_instances(postgres_repo, postgres_dsn):
     postgres_repo.update_values([ObjectCount("cat", 2)])

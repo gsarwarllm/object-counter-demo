@@ -2,7 +2,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from counter.domain.actions import CountDetectedObjects, DetectObjects
+from counter.adapters.count_repo import CountInMemoryRepo
+from counter.domain.actions import CountDetectedObjects, DetectObjects, ReadObjectCounts
 from counter.domain.models import ObjectCount
 from tests.domain.helpers import generate_prediction
 
@@ -84,3 +85,29 @@ def test_debug_image_writer_gets_all_and_valid_predictions():
         [generate_prediction("cat", 0.9)],
         "valid_predictions_with_threshold_0.5.jpg",
     )
+
+
+class TestReadObjectCounts:
+    @pytest.fixture
+    def repo(self):
+        repo = CountInMemoryRepo()
+        repo.update_values([ObjectCount("dog", 1), ObjectCount("cat", 3), ObjectCount("cup", 2)])
+        return repo
+
+    def test_all_totals_sorted_by_class(self, repo):
+        assert ReadObjectCounts(repo).execute() == [
+            ObjectCount("cat", 3),
+            ObjectCount("cup", 2),
+            ObjectCount("dog", 1),
+        ]
+
+    def test_only_the_requested_classes(self, repo):
+        assert ReadObjectCounts(repo).execute(["dog", "cat", "unicorn"]) == [
+            ObjectCount("cat", 3),
+            ObjectCount("dog", 1),
+        ]
+
+    def test_never_changes_the_totals(self, repo):
+        ReadObjectCounts(repo).execute()
+
+        assert len(repo.read_values()) == 3

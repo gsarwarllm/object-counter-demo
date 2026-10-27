@@ -53,6 +53,14 @@ def post(api, base_url, path, image_bytes=None, **fields):
     return response
 
 
+def get(api, base_url, path, **params):
+    response = api.get(f"{base_url}{path}", params=params, timeout=10)
+    VALIDATOR.validate_response(
+        RequestsOpenAPIRequest(response.request), RequestsOpenAPIResponse(response)
+    )
+    return response
+
+
 def predicted_classes(body) -> list[str]:
     return [prediction["class_name"] for prediction in body["predictions"]]
 
@@ -168,3 +176,28 @@ def test_invalid_requests_get_problem_json(api, base_url, fields, image_bytes, f
 def test_api_docs_are_served(api, base_url):
     assert yaml.safe_load(api.get(f"{base_url}/openapi.yaml", timeout=10).text) == SPEC
     assert "swagger-ui" in api.get(f"{base_url}/docs/", timeout=10).text
+
+
+def test_alive_and_ready_with_every_pulled_model(api, base_url):
+    assert get(api, base_url, "/health").json() == {"status": "ok"}
+
+    response = get(api, base_url, "/health/ready")
+
+    assert response.status_code == 200
+    assert response.json()["checks"] == {
+        "repository": "ok",
+        "detectors": dict.fromkeys(json.loads(LOCK.read_text()), "ok"),
+    }
+
+
+def test_object_counts_reads_the_same_totals(api, base_url):
+    post(api, base_url, "/object-count", threshold="0.5")
+    expected = totals(api, base_url)
+
+    everything = get(api, base_url, "/object-counts").json()["total_objects"]
+    only_cats = get(api, base_url, "/object-counts", object_class="cat").json()["total_objects"]
+
+    assert {count["object_class"]: count["count"] for count in everything} == expected
+    assert only_cats == [{"object_class": "cat", "count": expected["cat"]}]
+    if (stored := database_totals()) is not None:
+        assert stored == expected

@@ -145,3 +145,49 @@ def test_failure_message_names_the_model(detector, post):
 
     with pytest.raises(DetectorUnavailableError, match="ssd_mobilenet_v2@3 failed: refused"):
         detector.predict(png_bytes("RGB"))
+
+
+def status_response(*states: str) -> Mock:
+    response = Mock()
+    response.json.return_value = {
+        "model_version_status": [{"version": "3", "state": state} for state in states]
+    }
+    return response
+
+
+@pytest.fixture
+def get(monkeypatch) -> Mock:
+    get = Mock(return_value=status_response("AVAILABLE"))
+    monkeypatch.setattr(requests, "get", get)
+    return get
+
+
+def test_ready_when_the_pinned_version_is_available(detector, get):
+    detector.check_ready()
+
+    assert get.call_args.args[0] == "http://tfs:8501/v1/models/ssd_mobilenet_v2/versions/3"
+    assert get.call_args.kwargs["timeout"] == 3.0  # capped below the predict timeout (7)
+
+
+def test_not_ready_while_the_model_is_loading(detector, get):
+    get.return_value = status_response("LOADING")
+
+    with pytest.raises(DetectorUnavailableError, match="ssd_mobilenet_v2@3 is not available"):
+        detector.check_ready()
+
+
+@pytest.mark.parametrize(
+    "failure", [requests.ConnectionError("refused"), requests.Timeout("too slow")]
+)
+def test_not_ready_when_tf_serving_is_unreachable(detector, get, failure):
+    get.side_effect = failure
+
+    with pytest.raises(DetectorUnavailableError, match="status for ssd_mobilenet_v2@3"):
+        detector.check_ready()
+
+
+def test_not_ready_on_an_unexpected_status_response(detector, get):
+    get.return_value.json.return_value = {"error": "Servable not found"}
+
+    with pytest.raises(DetectorUnavailableError, match="Unexpected TF Serving status"):
+        detector.check_ready()

@@ -132,3 +132,34 @@ def test_tf_serving_down_becomes_503(client, tf_serving):
 
     assert response.status_code == 503
     assert response.mimetype == "application/problem+json"
+
+
+def test_ready_checks_each_pinned_model_version(client, tf_serving):
+    response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.get_json()["checks"]["detectors"] == {
+        "acme_shelf_detector": "ok",
+        "ssd_mobilenet_v2": "ok",
+    }
+    assert sorted(request["path"] for request in tf_serving.requests) == [
+        "/v1/models/acme_shelf_detector/versions/5",
+        "/v1/models/ssd_mobilenet_v2/versions/3",
+    ]
+
+
+@pytest.mark.parametrize(("mode", "state"), [("ok", "LOADING"), ("error", "AVAILABLE")])
+def test_not_ready_while_models_load_or_tf_serving_fails(client, tf_serving, mode, state):
+    tf_serving.mode, tf_serving.model_state = mode, state
+
+    response = client.get("/health/ready")
+
+    assert response.status_code == 503
+    assert response.get_json()["status"] == "unavailable"
+
+
+def test_not_ready_when_tf_serving_is_down_but_still_alive(client, tf_serving):
+    tf_serving.stop()
+
+    assert client.get("/health/ready").status_code == 503
+    assert client.get("/health").status_code == 200

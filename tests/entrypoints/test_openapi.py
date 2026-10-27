@@ -14,7 +14,7 @@ from openapi_spec_validator import validate
 
 from counter.adapters.count_repo import CountInMemoryRepo
 from counter.adapters.detector_registry import DetectorRegistry, ServedModel
-from counter.domain.errors import DetectorUnavailableError
+from counter.domain.errors import DetectorUnavailableError, RepositoryUnavailableError
 from counter.entrypoints.webapp import OPENAPI_SPEC, create_app
 
 IMAGE = Path(__file__).parents[2] / "resources" / "images" / "cat.jpg"
@@ -80,7 +80,22 @@ def broken_registry_app(monkeypatch):
     return app
 
 
-# (method, path, expected status, app factory, form fields; None = no body)
+class DownRepo(CountInMemoryRepo):
+    def read_values(self, object_classes=None):
+        raise RepositoryUnavailableError("connection refused")
+
+
+def repository_down_app(monkeypatch):
+    return create_app(count_repo=DownRepo())
+
+
+def detector_not_ready_app(monkeypatch):
+    detector = Mock()
+    detector.check_ready.side_effect = DetectorUnavailableError("LOADING")
+    return app_with_detector(detector)
+
+
+# (method, path, expected status, app factory, fields: POST form or GET query; None = none)
 CASES = [
     ("post", "/object-count", 200, default_app, {"threshold": "0.5"}),
     ("post", "/object-count", 400, default_app, {"threshold": "abc"}),
@@ -94,6 +109,12 @@ CASES = [
     ("post", "/object-predictions", 503, detector_down_app, {}),
     ("get", "/models", 200, default_app, None),
     ("get", "/models", 500, broken_registry_app, None),
+    ("get", "/object-counts", 200, default_app, {"object_class": "cat"}),
+    ("get", "/object-counts", 400, default_app, {"object_class": ""}),
+    ("get", "/object-counts", 503, repository_down_app, None),
+    ("get", "/health", 200, default_app, None),
+    ("get", "/health/ready", 200, default_app, None),
+    ("get", "/health/ready", 503, detector_not_ready_app, None),
 ]
 
 
@@ -134,8 +155,8 @@ def test_every_documented_status_code_is_tested():
 def test_response_matches_the_spec(monkeypatch, method, path, status, make_app, form):
     app = make_app(monkeypatch)
     with app.test_client() as client:
-        if form is None:
-            response = getattr(client, method)(path)
+        if method == "get":
+            response = client.get(path, query_string=form)
         else:
             response = getattr(client, method)(
                 path, data=image_form(**form), content_type="multipart/form-data"

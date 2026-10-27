@@ -3,11 +3,11 @@ from dataclasses import asdict, dataclass
 from io import BytesIO
 
 from PIL import Image
-from werkzeug.datastructures import FileStorage
+from werkzeug.datastructures import FileStorage, MultiDict
 
 from counter.adapters.detector_registry import DetectorRegistry
 from counter.domain.errors import InvalidImageError, ValidationError
-from counter.domain.models import CountResponse, Prediction
+from counter.domain.models import CountResponse, ObjectCount, Prediction
 
 DEFAULT_THRESHOLD = 0.5
 ACCEPTED_IMAGE_FORMATS = {"JPEG", "PNG"}
@@ -34,6 +34,14 @@ def parse_image_request(
     )
 
 
+def parse_object_classes(args: MultiDict[str, str]) -> list[str] | None:
+    """The repeatable object_class query parameter of GET /object-counts; None means all."""
+    object_classes = args.getlist("object_class")
+    if "" in object_classes:
+        raise ValidationError("object_class", "must not be empty")
+    return object_classes or None
+
+
 def to_model_dto(name: str, version: str | None) -> dict:
     return {"name": name, "version": version}
 
@@ -51,6 +59,10 @@ def to_predictions_response_dto(
         "predictions": [asdict(prediction) for prediction in predictions],
         "model": model,
     }
+
+
+def to_object_counts_response_dto(object_counts: list[ObjectCount]) -> dict:
+    return {"total_objects": [asdict(object_count) for object_count in object_counts]}
 
 
 def to_models_response_dto(detectors: DetectorRegistry) -> dict:

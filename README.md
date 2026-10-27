@@ -104,7 +104,25 @@ curl http://localhost:5000/models
 # {"default_model": "ssd_mobilenet_v2", "models": [{"name": "acme_shelf_detector", "version": "1"}, {"name": "ssd_mobilenet_v2", "version": "1"}]}
 ```
 
-Both endpoints take `threshold` (optional, `0`–`1`, default `0.5`, inclusive), `file` (JPEG or PNG) and `model_name` (optional, default: the manifest's `default_model`). Responses include the model that answered, e.g. `"model": {"name": "ssd_mobilenet_v2", "version": "1"}` (`version` is `null` in dev). All models add to the same running totals. Errors are returned as [RFC 7807](https://www.rfc-editor.org/rfc/rfc7807) `application/problem+json`:
+Read the totals without uploading an image (sorted by class; repeat `object_class` to filter):
+
+```bash
+curl http://localhost:5000/object-counts
+curl "http://localhost:5000/object-counts?object_class=cat&object_class=dog"
+# {"total_objects": [{"object_class": "cat", "count": 3}, {"object_class": "dog", "count": 1}]}
+```
+
+Health checks, for Docker, Kubernetes or a load balancer:
+
+```bash
+curl http://localhost:5000/health        # liveness: {"status": "ok"}, no dependencies checked
+curl http://localhost:5000/health/ready  # readiness: 200, or 503 if the count store or a model isn't ready
+# {"status": "ok", "checks": {"repository": "ok", "detectors": {"acme_shelf_detector": "ok", "ssd_mobilenet_v2": "ok"}}}
+```
+
+Readiness asks TF Serving whether each pinned model version is `AVAILABLE` and pings the configured count store (MongoDB or PostgreSQL). Failure causes are logged, not returned. The Compose `app` service uses it as its healthcheck, so `docker compose up --wait` returns once requests can succeed.
+
+The two image endpoints take `threshold` (optional, `0`–`1`, default `0.5`, inclusive), `file` (JPEG or PNG) and `model_name` (optional, default: the manifest's `default_model`). Responses include the model that answered, e.g. `"model": {"name": "ssd_mobilenet_v2", "version": "1"}` (`version` is `null` in dev). All models add to the same running totals. Errors are returned as [RFC 7807](https://www.rfc-editor.org/rfc/rfc7807) `application/problem+json`:
 
 | Status | When |
 |---|---|

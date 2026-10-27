@@ -1,11 +1,12 @@
 openapi: 3.0.3
 info:
   title: Object Counter API
-  version: 1.1.0
+  version: 1.2.0
   description: >
     Detects objects in an image, counts those whose confidence score is at or above a
     threshold (grouped by class) and keeps accumulated totals. Several models can be served
-    side by side; `model_name` selects one and `GET /models` lists them.
+    side by side; `model_name` selects one and `GET /models` lists them. `GET /object-counts`
+    reads the totals, and `/health` and `/health/ready` are the liveness and readiness probes.
 
 
     Errors use RFC 7807 `application/problem+json`. Unknown routes (404) and wrong methods
@@ -20,6 +21,8 @@ tags:
     description: Inspect the raw predictions (read-only)
   - name: models
     description: The models that can answer requests
+  - name: health
+    description: Liveness and readiness probes (for Docker, Kubernetes, load balancers)
 
 paths:
   /object-count:
@@ -112,6 +115,104 @@ paths:
                   - { name: ssd_mobilenet_v2, version: '1' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /object-counts:
+    get:
+      tags: [counting]
+      operationId: readObjectCounts
+      summary: Read the accumulated totals without uploading an image
+      description: Read-only. The same totals as `total_objects` in `POST /object-count`.
+      parameters:
+        - name: object_class
+          in: query
+          required: false
+          description: >
+            Only these classes; repeat the parameter for several. Missing means every class.
+            Classes that were never counted are left out.
+          schema:
+            type: array
+            items: { type: string, minLength: 1 }
+          style: form
+          explode: true
+          example: [cat, dog]
+      responses:
+        '200':
+          description: Totals, sorted by object_class
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObjectCountsResponse' }
+              example:
+                total_objects:
+                  - { object_class: cat, count: 3 }
+                  - { object_class: dog, count: 1 }
+        '400':
+          description: An object_class value is empty
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              example:
+                type: about:blank
+                title: Invalid request
+                status: 400
+                detail: Request validation failed
+                instance: /object-counts
+                errors: [ { field: object_class, message: must not be empty } ]
+        '503':
+          description: The count repository is unavailable
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              example:
+                type: about:blank
+                title: Count repository unavailable
+                status: 503
+                detail: The count store is unavailable
+                instance: /object-counts
+
+  /health:
+    get:
+      tags: [health]
+      operationId: liveness
+      summary: Liveness probe
+      description: The process is up and serving HTTP. Checks no dependencies.
+      responses:
+        '200':
+          description: Alive
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthResponse' }
+              example: { status: ok }
+
+  /health/ready:
+    get:
+      tags: [health]
+      operationId: readiness
+      summary: Readiness probe
+      description: >
+        Checks the configured count repository and every served model (in TF Serving, the
+        pinned version must be AVAILABLE). 200 only when all of them are ready. Failures are
+        logged with their cause; the response only says which check failed.
+      responses:
+        '200':
+          description: Ready to serve requests
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadinessResponse' }
+              example:
+                status: ok
+                checks:
+                  repository: ok
+                  detectors: { acme_shelf_detector: ok, ssd_mobilenet_v2: ok }
+        '503':
+          description: At least one dependency is unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadinessResponse' }
+              example:
+                status: unavailable
+                checks:
+                  repository: ok
+                  detectors: { acme_shelf_detector: ok, ssd_mobilenet_v2: unavailable }
+
 components:
   schemas:
     ImageRequest:
@@ -201,6 +302,36 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Prediction' }
         model: { $ref: '#/components/schemas/Model' }
+    ObjectCountsResponse:
+      type: object
+      required: [total_objects]
+      properties:
+        total_objects:
+          type: array
+          description: Accumulated totals across all requests and models, sorted by object_class
+          items: { $ref: '#/components/schemas/ObjectCount' }
+    CheckStatus:
+      type: string
+      enum: [ok, unavailable]
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok] }
+    ReadinessResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status: { $ref: '#/components/schemas/CheckStatus' }
+        checks:
+          type: object
+          required: [repository, detectors]
+          properties:
+            repository: { $ref: '#/components/schemas/CheckStatus' }
+            detectors:
+              type: object
+              description: One entry per served model (see GET /models)
+              additionalProperties: { $ref: '#/components/schemas/CheckStatus' }
     FieldError:
       type: object
       required: [field, message]

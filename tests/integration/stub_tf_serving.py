@@ -1,7 +1,8 @@
 """A stand-in TF Serving REST server for integration tests that don't need Docker.
 
 It answers POST /v1/models/<name>[/versions/<v>]:predict with a recorded response in the
-real TF Serving format, records each request, and can be told to fail.
+real TF Serving format and GET /v1/models/<name>[/versions/<v>] with the model status,
+records each request, and can be told to fail.
 """
 
 import json
@@ -13,11 +14,13 @@ from pathlib import Path
 
 RECORDED_RESPONSE = Path(__file__).parents[1] / "fixtures" / "tfs_predict_response.json"
 PREDICT_PATH = re.compile(r"^/v1/models/(?P<name>[\w-]+)(/versions/(?P<version>\d+))?:predict$")
+STATUS_PATH = re.compile(r"^/v1/models/(?P<name>[\w-]+)(/versions/(?P<version>\d+))?$")
 
 
 class StubTFServing:
     def __init__(self):
         self.mode = "ok"  # ok | error | malformed | slow
+        self.model_state = "AVAILABLE"  # what GET status reports, e.g. LOADING
         self.slow_seconds = 2.0
         self.requests: list[dict] = []
         self.__server = ThreadingHTTPServer(("127.0.0.1", 0), self.__handler())
@@ -46,6 +49,16 @@ class StubTFServing:
         stub = self
 
         class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                match = STATUS_PATH.match(self.path)
+                stub.requests.append({"path": self.path, "match": match, "body": None})
+                if match is None:
+                    return self.__reply(404, b'{"error": "unknown path"}')
+                if stub.mode == "error":
+                    return self.__reply(500, b'{"error": "server failed"}')
+                status = {"version": match["version"] or "1", "state": stub.model_state}
+                return self.__reply(200, json.dumps({"model_version_status": [status]}).encode())
+
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 match = PREDICT_PATH.match(self.path)

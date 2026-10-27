@@ -101,3 +101,22 @@ def test_concurrent_requests_lose_no_updates(store):
 
     assert statuses == [200] * 20
     assert store() == {"cat": 20}
+
+
+def test_object_counts_reads_the_database_without_writing(store):
+    with create_app().test_client() as client:
+        count(client)
+        response = client.get("/object-counts?object_class=cat")
+        everything = client.get("/object-counts").get_json()
+
+    assert response.get_json() == {"total_objects": [{"object_class": "cat", "count": 1}]}
+    assert everything == {"total_objects": [{"object_class": "cat", "count": 1}]}
+    assert store() == {"cat": 1}
+
+
+def test_ready_with_a_reachable_database(store):
+    with create_app().test_client() as client:
+        response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.get_json()["checks"]["repository"] == "ok"

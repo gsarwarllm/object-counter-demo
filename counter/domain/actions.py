@@ -1,6 +1,6 @@
 from typing import BinaryIO
 
-from counter.domain.models import CountResponse, Prediction
+from counter.domain.models import CountResponse, ObjectCount, Prediction
 from counter.domain.ports import DebugImageWriter, ObjectCountRepo, ObjectDetector
 from counter.domain.predictions import count, over_threshold, sort_by_score
 
@@ -40,6 +40,16 @@ class DetectObjects:
             self.__object_detector, image, threshold, self.__debug_image_writer
         )
         return sort_by_score(predictions)
+
+
+class ReadObjectCounts:
+    def __init__(self, object_count_repo: ObjectCountRepo) -> None:
+        self.__object_count_repo = object_count_repo
+
+    def execute(self, object_classes: list[str] | None = None) -> list[ObjectCount]:
+        """Totals for these classes (None: all), sorted by class; uncounted ones are left out."""
+        counts = self.__object_count_repo.read_values(object_classes)
+        return sorted(counts, key=lambda object_count: object_count.object_class)
 
 
 def find_valid_predictions(

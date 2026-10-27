@@ -21,3 +21,8 @@ def test_read_raises_domain_error_when_database_is_down(unreachable_repo):
 def test_update_raises_domain_error_when_database_is_down(unreachable_repo):
     with pytest.raises(RepositoryUnavailableError):
         unreachable_repo.update_values([ObjectCount("cat", 1)])
+
+
+def test_not_ready_when_database_is_down(unreachable_repo):
+    with pytest.raises(RepositoryUnavailableError):
+        unreachable_repo.check_ready()

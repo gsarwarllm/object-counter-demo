@@ -44,6 +44,10 @@ def test_unknown_classes_are_not_returned(repo):
     assert repo.read_values([]) == []
 
 
+def test_reachable_store_is_ready(repo):
+    repo.check_ready()
+
+
 def test_concurrent_updates_are_not_lost(repo):
     if isinstance(repo, CountInMemoryRepo):
         pytest.skip("the in-memory repo is per-process and not meant for concurrent writers")

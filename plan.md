@@ -378,8 +378,8 @@ curl http://localhost:5000/models
 | Method + path | Purpose | Response | Codes |
 |---|---|---|---|
 | `GET /health` | liveness: the process is up | `{ "status": "ok" }` | 200 |
-| `GET /health/ready` | readiness: detector and repo reachable | `{ "status": "ok", "checks": { "detector": "ok", "repository": "ok" } }` | 200, 503 |
-| `GET /object-counts?object_class=cat&object_class=dog` | read totals without uploading (uses the existing `read_values(object_classes)`) | `{ "total_objects": ObjectCount[] }` | 200, 503 |
+| `GET /health/ready` | readiness: every model's pinned version `AVAILABLE` in TF Serving and the repo reachable | `{ "status": "ok", "checks": { "repository": "ok", "detectors": { "<model>": "ok" } } }` (one entry per model, since M5) | 200, 503 |
+| `GET /object-counts?object_class=cat&object_class=dog` | read totals without uploading (uses the existing `read_values(object_classes)`), sorted by class | `{ "total_objects": ObjectCount[] }` | 200, 400 (empty `object_class`), 503 |
 
 ### 5.7 How the OpenAPI docs are produced in each framework
 
@@ -763,7 +763,7 @@ and `security:` per operation; Swagger UI shows an "Authorize" button.
 
 | ID | Item | Acceptance criteria |
 |---|---|---|
-| O2 | `GET /health`, `GET /health/ready`, `GET /object-counts` (section 5.6) | used by compose healthchecks; documented in OpenAPI |
+| O2 ✅ | `GET /health`, `GET /health/ready`, `GET /object-counts` (section 5.6) | used by compose healthchecks; documented in OpenAPI. Done in PR #20; readiness reports one check per served model (`checks.detectors.<model>`), since M5 serves several |
 | O3 | GitHub Actions: `make lint test` on every push, `make test-integration` with service containers | green badge in the README |
 | O4 | JSON logs with request ID; Prometheus `/metrics` (request count, latency, detector latency) | request ID returned in an `X-Request-ID` header |
 | O5 | Rate limiting (`flask-limiter` / `slowapi` / Bucket4j) | 429 problem+json when exceeded |

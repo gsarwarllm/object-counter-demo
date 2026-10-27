@@ -8,7 +8,7 @@ import pytest
 from counter.adapters.count_repo import CountInMemoryRepo
 from counter.adapters.detector_registry import DetectorRegistry, ServedModel
 from counter.adapters.object_detector import FakeObjectDetector
-from counter.domain.errors import DetectorUnavailableError
+from counter.domain.errors import DetectorUnavailableError, RepositoryUnavailableError
 from counter.domain.models import Box, Prediction
 from counter.entrypoints.webapp import create_app
 
@@ -321,3 +321,123 @@ def test_list_models_in_dev_shows_the_manifest_models(client):
         "acme_shelf_detector",
         "ssd_mobilenet_v2",
     ]
+
+
+def count_image(client, image_path):
+    post(client, "/object-count", {"threshold": "0.5", "file": image_file(image_path)})
+
+
+def test_object_counts_returns_the_totals(client, image_path):
+    assert client.get("/object-counts").get_json() == {"total_objects": []}
+    count_image(client, image_path)
+    count_image(client, image_path)
+
+    response = client.get("/object-counts")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"total_objects": [{"object_class": "cat", "count": 2}]}
+
+
+def test_object_counts_filters_by_class(two_model_client, image_path):
+    for model_name in ("cat_model", "dog_model"):
+        form = {"model_name": model_name, "file": image_file(image_path)}
+        post(two_model_client, "/object-count", form)
+
+    response = two_model_client.get("/object-counts?object_class=dog&object_class=unicorn")
+
+    assert response.get_json() == {"total_objects": [{"object_class": "dog", "count": 1}]}
+
+
+def test_object_counts_rejects_an_empty_class(client):
+    body = assert_problem(client.get("/object-counts?object_class="), 400, "Invalid request")
+    assert body["errors"] == [{"field": "object_class", "message": "must not be empty"}]
+
+
+def test_object_counts_returns_503_when_count_store_is_down(monkeypatch):
+    monkeypatch.setenv("COUNT_REPO", "postgres")
+    monkeypatch.setenv("DATABASE_URL", UNREACHABLE_POSTGRES)
+    monkeypatch.setenv("POSTGRES_TIMEOUT", "0.5")
+
+    with create_app().test_client() as client:
+        assert_problem(client.get("/object-counts"), 503, "Count repository unavailable")
+
+
+def test_liveness(client):
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ok"}
+
+
+def test_ready_in_dev(client):
+    response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "status": "ok",
+        "checks": {
+            "repository": "ok",
+            "detectors": {"acme_shelf_detector": "ok", "ssd_mobilenet_v2": "ok"},
+        },
+    }
+
+
+class NotReadyDetector(FakeObjectDetector):
+    def check_ready(self):
+        raise DetectorUnavailableError("dog_model@7 is not available: ['LOADING']")
+
+
+class DownRepo(CountInMemoryRepo):
+    def check_ready(self):
+        raise RepositoryUnavailableError("MongoDB unavailable: connection refused")
+
+
+def readiness_of(detectors, count_repo):
+    with create_app(detectors=detectors, count_repo=count_repo).test_client() as client:
+        return client.get("/health/ready")
+
+
+def test_not_ready_names_the_failing_model_and_logs_the_cause(caplog):
+    detectors = DetectorRegistry(
+        [
+            ServedModel("cat_model", "3", FakeObjectDetector()),
+            ServedModel("dog_model", "7", NotReadyDetector()),
+        ],
+        default_model="cat_model",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        response = readiness_of(detectors, CountInMemoryRepo())
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "status": "unavailable",
+        "checks": {
+            "repository": "ok",
+            "detectors": {"cat_model": "ok", "dog_model": "unavailable"},
+        },
+    }
+    assert "LOADING" not in response.get_data(as_text=True)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == ["Not ready: model dog_model: dog_model@7 is not available: ['LOADING']"]
+
+
+def test_not_ready_when_the_count_store_is_down():
+    detectors = DetectorRegistry([ServedModel("cat_model", "3", FakeObjectDetector())], "cat_model")
+
+    response = readiness_of(detectors, DownRepo())
+
+    assert response.status_code == 503
+    assert response.get_json()["checks"]["repository"] == "unavailable"
+
+
+def test_readiness_survives_an_unexpected_error():
+    detector = Mock()
+    detector.check_ready.side_effect = RuntimeError("bug")
+
+    response = readiness_of(
+        DetectorRegistry([ServedModel("m", "1", detector)], "m"), CountInMemoryRepo()
+    )
+
+    assert response.status_code == 503
+    assert response.get_json()["checks"]["detectors"] == {"m": "unavailable"}

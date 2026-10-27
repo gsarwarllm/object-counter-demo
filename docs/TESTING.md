@@ -26,10 +26,10 @@ No single kind of test gives all four. Fast tests can't prove that real componen
 The usual shape is the **test pyramid**: many unit and component tests at the bottom, fewer integration tests, few e2e tests at the top. The cost and flakiness of a test grow with every real component it includes, while its power to point at the exact defect shrinks. The pyramid is a budget, not a rule: a level is worth having when it catches defects the levels below can't.
 
 ```
-            e2e        11   real stack in Docker, real models          (CI: e2e job)
-        integration    22   real Postgres/Mongo, + 11 against a stub TF Serving
-     contract + API    52   Flask app, OpenAPI validation
-  unit + component    65   domain, adapters, config, registry scripts, with test doubles
+            e2e        13   real stack in Docker, real models          (CI: e2e job)
+        integration    28   real Postgres/Mongo, + 15 against a stub TF Serving
+     contract + API    70   Flask app, OpenAPI validation, CLI
+  unit + component    82   domain, adapters, config, logging, registry scripts, with test doubles
 ```
 
 ## 3. Why hexagonal architecture makes this cheap
@@ -83,7 +83,7 @@ An integration test proves that our code works with a real dependency: SQL that 
 |---|---|---|
 | `tests/adapters/test_count_repo_contract.py`, `test_count_repo_postgres.py` | PostgreSQL, MongoDB | `integration` |
 | `tests/integration/test_api_with_databases.py` | Flask app + PostgreSQL / MongoDB: persistence across restarts, reads don't write, concurrent requests | `integration` |
-| `tests/integration/test_tf_serving_http.py` | Flask app in prod mode + HTTP to a stub TF Serving | none (runs everywhere) |
+| `tests/integration/test_tf_serving_http.py` | Flask app in prod mode + HTTP to a stub TF Serving (predict and model status, for readiness) | none (runs everywhere) |
 | `tests/scripts/test_model_registry.py` | MLflow registry (SQLite) | `models` |
 
 ## 7. End-to-end tests
@@ -114,7 +114,7 @@ CI runs the suite twice: once with counts in MongoDB, then again after switching
 
 | Command | Runs | Needs | Time |
 |---|---|---|---|
-| `make test` (also the pre-push hook) | unit, component/API, contract, stub TF Serving integration: 133 tests | Python only | ~6 s |
+| `make test` (also the pre-push hook) | unit, component/API, contract, stub TF Serving integration: 163 tests | Python only | ~6 s |
 | `make coverage` | the same, with a coverage report; fails under 90% | Python only | ~9 s |
 | `make test-integration` | real PostgreSQL and MongoDB: 22 tests | Docker (or `TEST_*` servers) | ~1 min |
 | `make test-models` | model registry scripts against a throwaway MLflow registry: 4 tests | `make setup-models` | ~10 s |
@@ -140,14 +140,14 @@ Coverage shows what the tests **execute**, not what they **check**: a test with 
 
 | Level | Files | Tests | Tools |
 |---|---|---|---|
-| Unit: domain | `tests/domain/` | 10 | pytest, `unittest.mock` |
-| Unit / component: adapters | `tests/adapters/test_object_detector.py`, `test_models.py`, `test_debug_image_writer.py`, `test_count_repo_mongo.py`, repo-down tests in `test_count_repo_postgres.py` | 32 | pytest, `Mock`, Pillow, `caplog` |
+| Unit: domain | `tests/domain/` | 13 | pytest, `unittest.mock` |
+| Unit / component: adapters | `tests/adapters/test_object_detector.py`, `test_models.py`, `test_debug_image_writer.py`, `test_count_repo_mongo.py`, repo-down tests in `test_count_repo_postgres.py` | 39 | pytest, `Mock`, Pillow, `caplog` |
 | Component: config, logging and CLI | `tests/test_config.py`, `tests/test_logging_config.py`, `tests/entrypoints/test_cli.py` | 17 | pytest `monkeypatch`, `runpy` |
-| Component: API | `tests/entrypoints/test_webapp.py` | 35 | Flask test client, `caplog` (startup line, 503 cause, 500 traceback) |
-| Contract: API | `tests/entrypoints/test_openapi.py` | 17 | `openapi-core`, `openapi-spec-validator` |
-| Contract + integration: repositories | `tests/adapters/test_count_repo_contract.py` (memory, PostgreSQL, MongoDB), integration tests in `test_count_repo_postgres.py` | 20 (14 need Docker) | Testcontainers, psycopg, pymongo |
-| Integration: API + databases | `tests/integration/test_api_with_databases.py` | 8 | Testcontainers |
-| Integration: API + TF Serving over HTTP | `tests/integration/test_tf_serving_http.py` | 11 | stub HTTP server, recorded response |
+| Component: API | `tests/entrypoints/test_webapp.py` | 44 | Flask test client, `caplog` (startup line, 503 cause, 500 traceback) |
+| Contract: API | `tests/entrypoints/test_openapi.py` | 23 | `openapi-core`, `openapi-spec-validator` |
+| Contract + integration: repositories | `tests/adapters/test_count_repo_contract.py` (memory, PostgreSQL, MongoDB), integration tests in `test_count_repo_postgres.py` | 23 (16 need Docker) | Testcontainers, psycopg, pymongo |
+| Integration: API + databases | `tests/integration/test_api_with_databases.py` | 12 | Testcontainers |
+| Integration: API + TF Serving over HTTP | `tests/integration/test_tf_serving_http.py` | 15 | stub HTTP server, recorded response |
 | Integration: model registry | `tests/scripts/test_model_registry.py` | 9 (4 need MLflow) | MLflow |
-| End-to-end | `tests/e2e/test_e2e.py` | 11 | Docker Compose, requests, `openapi-core` |
-| **Total** | | **170** | |
+| End-to-end | `tests/e2e/test_e2e.py` | 13 | Docker Compose, requests, `openapi-core` |
+| **Total** | | **208** | |

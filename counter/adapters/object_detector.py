@@ -12,6 +12,8 @@ from counter.domain.models import Box, Prediction
 from counter.domain.ports import ObjectDetector
 
 logger = logging.getLogger(__name__)
+# Seconds; status checks back readiness probes, which must answer quickly.
+STATUS_TIMEOUT = 3.0
 
 
 class FakeObjectDetector(ObjectDetector):
@@ -39,9 +41,11 @@ class TFSObjectDetector(ObjectDetector):
     ):
         # A pinned version makes responses traceable to an exact model version.
         version_path = f"/versions/{version}" if version else ""
-        self.url = f"http://{host}:{port}/v1/models/{model}{version_path}:predict"
+        self.status_url = f"http://{host}:{port}/v1/models/{model}{version_path}"
+        self.url = f"{self.status_url}:predict"
         self.model_label = f"{model}@{version or 'latest'}"
         self.timeout = timeout
+        self.status_timeout = min(timeout, STATUS_TIMEOUT)
         self.classes_dict = classes
 
     def predict(self, image: BinaryIO) -> list[Prediction]:
@@ -71,6 +75,23 @@ class TFSObjectDetector(ObjectDetector):
             (time.perf_counter() - started) * 1000,
         )
         return predictions
+
+    def check_ready(self) -> None:
+        """Asks TF Serving for the model's status; ready only if a version is AVAILABLE."""
+        try:
+            response = requests.get(self.status_url, timeout=self.status_timeout)
+            response.raise_for_status()
+            states = [status["state"] for status in response.json()["model_version_status"]]
+        except requests.RequestException as error:
+            raise DetectorUnavailableError(
+                f"TF Serving status for {self.model_label} failed: {error}"
+            ) from error
+        except (ValueError, KeyError, TypeError) as error:
+            raise DetectorUnavailableError(
+                f"Unexpected TF Serving status for {self.model_label}: {error}"
+            ) from error
+        if "AVAILABLE" not in states:
+            raise DetectorUnavailableError(f"{self.model_label} is not available: {states}")
 
     @staticmethod
     def __to_np_array(image: BinaryIO) -> NDArray[np.uint8]:

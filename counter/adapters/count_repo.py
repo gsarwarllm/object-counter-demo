@@ -66,6 +66,10 @@ class CountMongoDBRepo(ObjectCountRepo):
                     upsert=True,
                 )
 
+    def check_ready(self) -> None:
+        with _mongo_errors():
+            self.__client.admin.command("ping")
+
     def close(self) -> None:
         self.__client.close()
 
@@ -119,6 +123,11 @@ class CountPostgresRepo(ObjectCountRepo):
         rows = sorted((value.object_class, value.count) for value in new_values)
         with self.__connection() as conn, conn.cursor() as cursor:
             cursor.executemany(self.UPSERT, rows)
+
+    def check_ready(self) -> None:
+        # Also creates the schema on first use, like any other query.
+        with self.__connection() as conn:
+            conn.execute("SELECT 1")
 
     def close(self) -> None:
         self.__pool.close()

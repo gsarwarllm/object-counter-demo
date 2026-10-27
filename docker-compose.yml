@@ -65,11 +65,13 @@ services:
     volumes:
       # Which model versions to call, written by `make pull-models`
       - ./tmp/model/models.lock.json:/app/tmp/model/models.lock.json:ro
+    # Healthy only when the count store is reachable and TF Serving has loaded every pinned
+    # model version, so `docker compose up --wait` returns when requests can succeed.
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/models', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health/ready', timeout=8)"]
       interval: 5s
-      timeout: 5s
-      retries: 30
+      timeout: 10s
+      retries: 60
     depends_on:
       tfserving:
         condition: service_healthy

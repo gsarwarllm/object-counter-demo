@@ -9,6 +9,10 @@ class ObjectDetector(ABC):
     def predict(self, image: BinaryIO) -> list[Prediction]:
         raise NotImplementedError
 
+    # Not abstract: in-process detectors (fakes) are always ready.
+    def check_ready(self) -> None:  # noqa: B027
+        """Raises DetectorUnavailableError if predict() can't work now."""
+
 
 class ObjectCountRepo(ABC):
     @abstractmethod
@@ -18,6 +22,10 @@ class ObjectCountRepo(ABC):
     @abstractmethod
     def update_values(self, new_values: list[ObjectCount]) -> None:
         raise NotImplementedError
+
+    # Not abstract: in-process stores (memory) are always ready.
+    def check_ready(self) -> None:  # noqa: B027
+        """Raises RepositoryUnavailableError if the store can't be used now."""
 
 
 class DebugImageWriter(ABC):

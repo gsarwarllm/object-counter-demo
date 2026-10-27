@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_file
@@ -8,7 +9,7 @@ from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from counter import config
 from counter.adapters.detector_registry import DetectorRegistry
-from counter.domain.actions import CountDetectedObjects, DetectObjects
+from counter.domain.actions import CountDetectedObjects, DetectObjects, ReadObjectCounts
 from counter.domain.errors import (
     DetectorUnavailableError,
     InvalidImageError,
@@ -18,9 +19,11 @@ from counter.domain.errors import (
 from counter.domain.ports import ObjectCountRepo
 from counter.entrypoints.schemas import (
     parse_image_request,
+    parse_object_classes,
     to_count_response_dto,
     to_model_dto,
     to_models_response_dto,
+    to_object_counts_response_dto,
     to_predictions_response_dto,
 )
 from counter.logging_config import configure_logging
@@ -54,6 +57,7 @@ def create_app(
     detect_actions = {
         model.name: DetectObjects(model.detector, debug_image_writer) for model in detectors.models
     }
+    read_object_counts = ReadObjectCounts(count_repo)
     # What this process serves, so a log shows which model versions and store were in use.
     logger.info(
         "Serving models %s (default %s), env=%s, count repo=%s, debug images=%s",
@@ -88,6 +92,29 @@ def create_app(
             )
         )
 
+    @app.route("/object-counts", methods=["GET"])
+    def object_counts() -> Response:
+        object_counts = read_object_counts.execute(parse_object_classes(request.args))
+        return jsonify(to_object_counts_response_dto(object_counts))
+
+    @app.route("/health", methods=["GET"])
+    def liveness() -> Response:
+        return jsonify({"status": "ok"})
+
+    @app.route("/health/ready", methods=["GET"])
+    def readiness() -> tuple[Response, int]:
+        repository = _check("count repository", count_repo.check_ready)
+        detector_checks = {
+            model.name: _check(f"model {model.name}", model.detector.check_ready)
+            for model in detectors.models
+        }
+        ready = repository == "ok" and all(status == "ok" for status in detector_checks.values())
+        body = {
+            "status": "ok" if ready else "unavailable",
+            "checks": {"repository": repository, "detectors": detector_checks},
+        }
+        return jsonify(body), 200 if ready else 503
+
     @app.route("/models", methods=["GET"])
     def list_models() -> Response:
         return jsonify(to_models_response_dto(detectors))
@@ -103,6 +130,16 @@ def create_app(
 
     register_error_handlers(app)
     return app
+
+
+def _check(name: str, check: Callable[[], None]) -> str:
+    """Runs one readiness check; the cause of a failure is logged, never returned."""
+    try:
+        check()
+    except Exception as error:  # a readiness probe reports failures; it never fails itself
+        logger.warning("Not ready: %s: %s", name, error)
+        return "unavailable"
+    return "ok"
 
 
 def register_error_handlers(app: Flask) -> None:
