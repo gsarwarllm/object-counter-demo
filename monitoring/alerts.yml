@@ -1,0 +1,52 @@
+# Alert rules (Prometheus UI > Alerts). Routing them to e-mail or chat needs an Alertmanager,
+# which this local setup leaves out.
+groups:
+  - name: object-counter
+    rules:
+      - alert: ModelDrift
+        # PSI 0.25 or more: the model's recent outputs differ clearly from its baseline
+        expr: max by (model, version, feature) (model_drift_psi{feature=~"scores|detections|classes"}) >= 0.25
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.model }}@{{ $labels.version }}: {{ $labels.feature }} drifted (PSI {{ $value | printf \"%.2f\" }})"
+      - alert: InputDrift
+        # The uploaded images changed (size, brightness, contrast, colour mode); the model may
+        # not have been trained for them yet, even if its outputs still look normal
+        expr: max by (model, version, feature) (model_drift_psi{feature=~"aspect_ratio|megapixels|brightness|contrast|color_mode"}) >= 0.25
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "{{ $labels.model }}@{{ $labels.version }}: input {{ $labels.feature }} drifted (PSI {{ $value | printf \"%.2f\" }})"
+      - alert: HighServerErrorRate
+        expr: >
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(http_requests_total[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "More than 5% of requests fail with 5xx"
+      - alert: DetectorUnavailable
+        expr: sum by (model, version) (rate(detector_requests_total{outcome="unavailable"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.model }}@{{ $labels.version }}: TF Serving calls fail"
+      - alert: CandidateUnhealthy
+        # A shadow or canary candidate fails more often than its champion: stop the release
+        # (RELEASE_MODE=off) or roll the candidate alias back before promoting it
+        expr: >
+          (
+            sum by (model, version) (rate(detector_requests_total{outcome=~"unavailable|error"}[10m]))
+            / sum by (model, version) (rate(detector_requests_total[10m]))
+          ) * on (model, version) group_left model_release_info{role="candidate"}
+          > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Candidate {{ $labels.model }}@{{ $labels.version }}: more than 5% of calls fail"

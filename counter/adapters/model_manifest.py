@@ -1,4 +1,5 @@
-"""Reads models/models.json (which models exist) and models.lock.json (which versions are pulled).
+"""Reads models/models.json (which models exist), models.lock.json (which versions are pulled) and
+candidates.lock.json (which candidate versions are served next to them, for shadow or canary).
 
 Standard library only: the model registry scripts in scripts/ use it too.
 """
@@ -10,6 +11,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPO_ROOT / "models" / "models.json"
 DEFAULT_LOCK = REPO_ROOT / "tmp" / "model" / "models.lock.json"
+CANDIDATES_LOCK_NAME = "candidates.lock.json"
 
 
 @dataclass(frozen=True)
@@ -78,3 +80,8 @@ def read_lock(path: Path = DEFAULT_LOCK) -> dict[str, str]:
 def write_lock(versions: dict[str, str], path: Path = DEFAULT_LOCK) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(versions, indent=2, sort_keys=True) + "\n")
+
+
+def candidates_lock(lock_path: Path = DEFAULT_LOCK) -> Path:
+    """The candidates lock lives next to models.lock.json (written by the same `pull`)."""
+    return Path(lock_path).with_name(CANDIDATES_LOCK_NAME)

@@ -26,10 +26,10 @@ No single kind of test gives all four. Fast tests can't prove that real componen
 The usual shape is the **test pyramid**: many unit and component tests at the bottom, fewer integration tests, few e2e tests at the top. The cost and flakiness of a test grow with every real component it includes, while its power to point at the exact defect shrinks. The pyramid is a budget, not a rule: a level is worth having when it catches defects the levels below can't.
 
 ```
-            e2e        13   real stack in Docker, real models          (CI: e2e job)
-        integration    28   real Postgres/Mongo, + 15 against a stub TF Serving
-     contract + API    70   Flask app, OpenAPI validation, CLI
-  unit + component    82   domain, adapters, config, logging, registry scripts, with test doubles
+            e2e        20   real stack in Docker, real models, monitoring, drift  (CI: e2e job)
+        integration    30   real Postgres/Mongo, + 15 against a stub TF Serving
+     contract + API    81   Flask app, OpenAPI validation, CLIs
+  unit + component   160   domain, drift, evaluation, adapters, config, logging, metrics, registry scripts
 ```
 
 ## 3. Why hexagonal architecture makes this cheap
@@ -106,7 +106,7 @@ Setup waits until TF Serving reports every pulled version as `AVAILABLE`, so the
 - `/object-predictions` doesn't change the totals; invalid input returns problem+json; `/docs` and `/openapi.yaml` are served;
 - **every response is validated against `docs/openapi.yaml`**, so the contract holds on the deployed image, not only in the test client.
 
-CI runs the suite twice: once with counts in MongoDB, then again after switching the app container to PostgreSQL.
+CI runs the suite twice: once with counts in MongoDB, then again after switching the app container to PostgreSQL. Then it publishes a second version of `acme_shelf_detector`, makes it the candidate and runs `tests/e2e/test_release.py` twice more: with `RELEASE_MODE=shadow` (the client gets the champion, the candidate's calls and the comparison show up in the metrics) and with `RELEASE_MODE=canary` at 100% (the candidate answers; `release_check` runs real PromQL against Prometheus). Release tests carry a `release_mode(<mode>)` marker and are deselected (not skipped) unless `E2E_RELEASE_MODE` matches, so the other passes stay skip-free.
 
 **Determinism with ML models.** Model outputs change between model versions and can differ slightly between CPUs, so the e2e tests assert **properties** (the expected class is present, scores are in range and sorted, boxes are valid) rather than exact scores. Exact-value ("golden") tests belong to model evaluation, with tolerances, not to API tests.
 
@@ -114,11 +114,11 @@ CI runs the suite twice: once with counts in MongoDB, then again after switching
 
 | Command | Runs | Needs | Time |
 |---|---|---|---|
-| `make test` (also the pre-push hook) | unit, component/API, contract, stub TF Serving integration: 163 tests | Python only | ~6 s |
+| `make test` (also the pre-push hook) | unit, component/API, contract, stub TF Serving integration: 301 tests | Python only | ~15 s |
 | `make coverage` | the same, with a coverage report; fails under 90% | Python only | ~9 s |
-| `make test-integration` | real PostgreSQL and MongoDB: 22 tests | Docker (or `TEST_*` servers) | ~1 min |
-| `make test-models` | model registry scripts against a throwaway MLflow registry: 4 tests | `make setup-models` | ~10 s |
-| `make e2e` | the stack in Docker, then 11 e2e tests | Docker, `make models` | minutes |
+| `make test-integration` | real PostgreSQL and MongoDB: 30 tests | Docker (or `TEST_*` servers) | ~1 min |
+| `make test-models` | model registry scripts against a throwaway MLflow registry: 11 tests | `make setup-models` | ~10 s |
+| `make e2e` | the stack in Docker, then 20 e2e tests (CI adds 4 release tests in shadow and canary mode) | Docker, `make models` | minutes |
 
 Every pull request runs all of them in CI ([`ci.yml`](../.github/workflows/ci.yml)), in parallel jobs: `test` (with coverage), `integration`, `models`, `e2e`, plus `lint`, `security` and `docker`. The `integration` and `e2e` jobs **fail if any test is skipped**: on CI, Docker is available, so a skip means something is broken, not optional.
 
@@ -141,13 +141,14 @@ Coverage shows what the tests **execute**, not what they **check**: a test with 
 | Level | Files | Tests | Tools |
 |---|---|---|---|
 | Unit: domain | `tests/domain/` | 13 | pytest, `unittest.mock` |
-| Unit / component: adapters | `tests/adapters/test_object_detector.py`, `test_models.py`, `test_debug_image_writer.py`, `test_count_repo_mongo.py`, repo-down tests in `test_count_repo_postgres.py` | 39 | pytest, `Mock`, Pillow, `caplog` |
-| Component: config, logging and CLI | `tests/test_config.py`, `tests/test_logging_config.py`, `tests/entrypoints/test_cli.py` | 17 | pytest `monkeypatch`, `runpy` |
-| Component: API | `tests/entrypoints/test_webapp.py` | 44 | Flask test client, `caplog` (startup line, 503 cause, 500 traceback) |
-| Contract: API | `tests/entrypoints/test_openapi.py` | 23 | `openapi-core`, `openapi-spec-validator` |
-| Contract + integration: repositories | `tests/adapters/test_count_repo_contract.py` (memory, PostgreSQL, MongoDB), integration tests in `test_count_repo_postgres.py` | 23 (16 need Docker) | Testcontainers, psycopg, pymongo |
+| Unit: drift monitoring and evaluation | `tests/monitoring/` (PSI, feature binning, prediction-drift scenarios such as a model losing confidence, input-drift scenarios such as a new camera or greyscale uploads, baselines incl. old ones, cached monitor, Prometheus collector; evaluation metrics, quality-gate decisions, model card; canary verdicts and release info) | 44 | pytest, synthetic prediction records |
+| Unit / component: adapters | `tests/adapters/test_object_detector.py`, `test_models.py`, `test_debug_image_writer.py`, `test_count_repo_mongo.py`, repo-down tests in `test_count_repo_postgres.py`, `test_prediction_log.py` (in-memory, background writer: queue full, store down), `test_image_stats.py`, `test_shadow_detector.py` (champion answers, class agreement, failing candidate, pool full) | 62 | pytest, `Mock`, Pillow, `caplog` |
+| Component: config, logging, metrics and CLI | `tests/test_config.py`, `tests/test_logging_config.py`, `tests/test_metrics.py` (detector decorator incl. prediction logging, multiprocess metrics, gunicorn hooks), `tests/entrypoints/test_cli.py`, `tests/entrypoints/test_drift_cli.py`, `test_routing.py` (canary share, fallback), `test_release_check.py` (against a stub Prometheus, PromQL injection rejected) | 61 | pytest `monkeypatch`, `capsys`, `runpy`, `prometheus_client` registry, stub HTTP server |
+| Component: API | `tests/entrypoints/test_webapp.py` (incl. shadow and canary releases) | 60 | Flask test client, `caplog` (startup line, 503 cause, 500 traceback) |
+| Contract: API | `tests/entrypoints/test_openapi.py` (incl. responses during a release) | 29 | `openapi-core`, `openapi-spec-validator` |
+| Contract + integration: repositories | `tests/adapters/test_count_repo_contract.py` (memory, PostgreSQL, MongoDB), integration tests in `test_count_repo_postgres.py`, the PostgreSQL prediction log (incl. the migration of an older table) | 25 (18 need Docker) | Testcontainers, psycopg, pymongo |
 | Integration: API + databases | `tests/integration/test_api_with_databases.py` | 12 | Testcontainers |
 | Integration: API + TF Serving over HTTP | `tests/integration/test_tf_serving_http.py` | 15 | stub HTTP server, recorded response |
-| Integration: model registry | `tests/scripts/test_model_registry.py` | 9 (4 need MLflow) | MLflow |
-| End-to-end | `tests/e2e/test_e2e.py` | 13 | Docker Compose, requests, `openapi-core` |
-| **Total** | | **208** | |
+| Integration: model registry | `tests/scripts/test_model_registry.py` (incl. `baseline` and `evaluate` against the stub TF Serving; quality gate, `--force`, candidate serving and its lock with MLflow, `publish --model`) | 21 (11 need MLflow) | MLflow, stub TF Serving |
+| End-to-end | `tests/e2e/test_e2e.py`, `tests/e2e/test_monitoring.py` (Prometheus targets, metrics arrive, dashboard queries valid, alert rules loaded, Grafana provisioned; predictions logged in PostgreSQL and drift reported against the CI-computed baseline), `tests/e2e/test_release.py` (shadow and canary, run in their own CI passes) | 24 | Docker Compose, requests, `openapi-core` |
+| **Total** | | **366** | |

@@ -1,11 +1,15 @@
 services:
   tfserving:
     image: tensorflow/serving:2.18.0
-    command: --model_config_file=/models/model_config.config
+    command:
+      - --model_config_file=/models/model_config.config
+      # TF Serving's own Prometheus metrics at /monitoring/prometheus/metrics
+      - --monitoring_config_file=/monitoring/tfserving_monitoring.config
     ports:
       - "8501:8501"
     volumes:
       - ./tmp/model:/models:ro
+      - ./monitoring/tfserving_monitoring.config:/monitoring/tfserving_monitoring.config:ro
     healthcheck:
       test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/8501' || exit 1"]
       interval: 5s
@@ -47,6 +51,7 @@ services:
     environment:
       ENV: prod
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
       TFS_HOST: tfserving
       TFS_PORT: "8501"
       MODELS_LOCK: /app/tmp/model/models.lock.json
@@ -60,11 +65,23 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-counter}
       POSTGRES_USER: ${POSTGRES_USER:-counter}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-counter}
+      # Model outputs for drift monitoring go to PostgreSQL, whatever COUNT_REPO is
+      PREDICTION_LOG: ${PREDICTION_LOG:-postgres}
+      BASELINES_DIR: /app/tmp/baselines
+      DRIFT_WINDOW_HOURS: ${DRIFT_WINDOW_HOURS:-24}
+      DRIFT_MIN_IMAGES: ${DRIFT_MIN_IMAGES:-30}
+      DRIFT_CACHE_SECONDS: ${DRIFT_CACHE_SECONDS:-300}
+      # Shadow or canary release of each model's candidate version (candidates.lock.json)
+      RELEASE_MODE: ${RELEASE_MODE:-off}
+      CANARY_PERCENT: ${CANARY_PERCENT:-10}
     ports:
       - "5000:5000"
     volumes:
-      # Which model versions to call, written by `make pull-models`
-      - ./tmp/model/models.lock.json:/app/tmp/model/models.lock.json:ro
+      # Which model versions to call (models.lock.json, candidates.lock.json), written by
+      # `make pull-models`; the folder, so a lock missing on the host isn't created as a folder
+      - ./tmp/model:/app/tmp/model:ro
+      # Drift baselines per model version, written by `make pull-models` / `make baseline`
+      - ./tmp/baselines:/app/tmp/baselines:ro
     # Healthy only when the count store is reachable and TF Serving has loaded every pinned
     # model version, so `docker compose up --wait` returns when requests can succeed.
     healthcheck:
@@ -78,6 +95,44 @@ services:
       mongo:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+
+  # Metrics and dashboards: `docker compose --profile app --profile monitoring up -d`
+  # Prometheus: http://localhost:9090, Grafana: http://localhost:3000 (dashboard "Object Counter")
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v2.53.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:11.1.0
+    environment:
+      # Anonymous read-only access for local use; sign in as admin to edit
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      prometheus:
         condition: service_healthy
 
 volumes:

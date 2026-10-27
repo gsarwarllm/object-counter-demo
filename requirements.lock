@@ -41,6 +41,8 @@ pillow==13.0.0
     # via -r requirements.txt
 pluggy==1.7.0
     # via pytest
+prometheus-client==0.26.0
+    # via -r requirements.txt
 psycopg==3.3.6
     # via -r requirements.txt
 psycopg-binary==3.3.6 ; implementation_name != 'pypy'

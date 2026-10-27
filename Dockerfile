@@ -15,7 +15,10 @@ COPY docs/openapi.yaml ./docs/openapi.yaml
 RUN useradd --create-home appuser
 USER appuser
 
+# Workers share their Prometheus metrics through this directory (see counter/metrics.py).
+ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
+
 EXPOSE 5000
-# --access-logfile -: one line per request on stdout (gunicorn logs none by default)
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--access-logfile", "-", \
+# Bind address, workers, access log and metrics clean-up: counter/entrypoints/gunicorn_conf.py
+CMD ["gunicorn", "-c", "counter/entrypoints/gunicorn_conf.py", \
      "counter.entrypoints.webapp:create_app()"]

@@ -8,6 +8,7 @@ from counter.adapters.detector_registry import DetectorRegistry, ServedModel
 from counter.adapters.model_manifest import (
     DEFAULT_MANIFEST,
     ModelSpec,
+    candidates_lock,
     load_label_map,
     load_manifest,
     read_lock,
@@ -57,6 +58,9 @@ class TestManifest:
     def test_invalid_manifests_are_rejected(self, tmp_path, models, default_model, message):
         with pytest.raises(ValueError, match=message):
             load_manifest(write_manifest(tmp_path, models, default_model))
+
+    def test_candidates_lock_lives_next_to_the_lock(self, tmp_path):
+        assert candidates_lock(tmp_path / "models.lock.json") == tmp_path / "candidates.lock.json"
 
     def test_lock_round_trip(self, tmp_path):
         lock = tmp_path / "nested" / "models.lock.json"
@@ -110,3 +114,20 @@ class TestDetectorRegistry:
 
         registry = DetectorRegistry.from_manifest(manifest, factory, {}, require_versions=False)
         assert registry.get("b").version is None
+
+    def test_from_manifest_adds_candidate_versions(self, tmp_path):
+        manifest = load_manifest(write_manifest(tmp_path, [entry("a"), entry("b")]))
+        (tmp_path / "labels.json").write_text('[{"id": 1, "display_name": "cat"}]')
+        factory = DetectorFactory()
+
+        registry = DetectorRegistry.from_manifest(
+            manifest,
+            factory,
+            {"a": "1", "b": "1"},
+            require_versions=True,
+            candidate_versions={"a": "2"},
+        )
+
+        assert registry.get("a").candidate.version == "2"
+        assert registry.get("a").candidate.detector.url.endswith("/v1/models/a/versions/2:predict")
+        assert registry.get("b").candidate is None

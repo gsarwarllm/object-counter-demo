@@ -38,6 +38,7 @@ def client(tf_serving, monkeypatch, tmp_path):
     monkeypatch.setenv("TFS_TIMEOUT", "0.5")
     monkeypatch.setenv("MODELS_LOCK", str(lock))
     monkeypatch.setenv("COUNT_REPO", "memory")
+    monkeypatch.setenv("PREDICTION_LOG", "memory")
     with create_app().test_client() as client:
         yield client
 

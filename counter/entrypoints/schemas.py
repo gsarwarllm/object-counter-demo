@@ -65,14 +65,25 @@ def to_object_counts_response_dto(object_counts: list[ObjectCount]) -> dict:
     return {"total_objects": [asdict(object_count) for object_count in object_counts]}
 
 
-def to_models_response_dto(detectors: DetectorRegistry) -> dict:
-    return {
-        "default_model": detectors.default_model,
-        "models": [
-            to_model_dto(model.name, model.version)
-            for model in sorted(detectors.models, key=lambda model: model.name)
-        ],
-    }
+def to_release_dto(mode: str, candidate_version: str, canary_percent: float) -> dict:
+    release: dict = {"mode": mode, "candidate_version": candidate_version}
+    if mode == "canary":
+        release["canary_percent"] = canary_percent
+    return release
+
+
+def to_models_response_dto(
+    detectors: DetectorRegistry, releases: dict[str, dict] | None = None
+) -> dict:
+    """releases: the shadow or canary release of a model, if one is running (X6)."""
+    releases = releases or {}
+    models = []
+    for model in sorted(detectors.models, key=lambda model: model.name):
+        dto = to_model_dto(model.name, model.version)
+        if model.name in releases:
+            dto["release"] = releases[model.name]
+        models.append(dto)
+    return {"default_model": detectors.default_model, "models": models}
 
 
 def _parse_threshold(form: Mapping[str, str]) -> float:

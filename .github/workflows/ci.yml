@@ -71,26 +71,78 @@ jobs:
           python scripts/model_registry.py pull
         env:
           PYTHONPATH: .
-      - name: Start the stack (app, TF Serving, MongoDB, PostgreSQL)
-        run: docker compose --profile app up -d --build --wait
+      - name: Start the stack (app, TF Serving, MongoDB, PostgreSQL, Prometheus, Grafana)
+        run: docker compose --profile app --profile monitoring up -d --build --wait
+        env:
+          # Report drift from the first image and without caching, so the tests can see it
+          DRIFT_MIN_IMAGES: "1"
+          DRIFT_CACHE_SECONDS: "0"
+      - name: Drift baselines from the reference images, stored with each version in MLflow
+        run: python scripts/model_registry.py baseline
+        env:
+          PYTHONPATH: .
+      - name: Evaluate the served versions (quality gate input), with an absolute F1 floor
+        run: |
+          python scripts/model_registry.py evaluate ssd_mobilenet_v2 1 --min-f1 0.3
+          python scripts/model_registry.py evaluate acme_shelf_detector 1 --min-f1 0.3
+        env:
+          PYTHONPATH: .
       - name: End-to-end tests (counts in MongoDB)
         run: |
           python -m pytest -q -m e2e -rs | tee e2e-mongo.log
           ! grep -q SKIPPED e2e-mongo.log
         env:
           E2E_BASE_URL: http://localhost:5000
+          E2E_PROMETHEUS_URL: http://localhost:9090
+          E2E_GRAFANA_URL: http://localhost:3000
           E2E_COUNT_REPO: mongo
       - name: Switch the app to PostgreSQL
         run: COUNT_REPO=postgres docker compose --profile app up -d --wait app
+        env:
+          DRIFT_MIN_IMAGES: "1"
+          DRIFT_CACHE_SECONDS: "0"
       - name: End-to-end tests (counts in PostgreSQL)
         run: |
           python -m pytest -q -m e2e -rs | tee e2e-postgres.log
           ! grep -q SKIPPED e2e-postgres.log
         env:
           E2E_BASE_URL: http://localhost:5000
+          E2E_PROMETHEUS_URL: http://localhost:9090
+          E2E_GRAFANA_URL: http://localhost:3000
           E2E_COUNT_REPO: postgres
+      - name: Publish a candidate version (version 2 of acme_shelf_detector) and serve it
+        # The other model's weights stand in for a retrained model: a different version to release
+        run: |
+          mkdir -p tmp/candidate
+          cp -r tmp/downloads/ssd_mobilenet_v2 tmp/candidate/acme_shelf_detector
+          python scripts/model_registry.py publish --model acme_shelf_detector --downloads tmp/candidate
+          python scripts/model_registry.py promote acme_shelf_detector 2 --alias candidate
+          python scripts/model_registry.py pull
+          docker compose restart tfserving
+        env:
+          PYTHONPATH: .
+      - name: Shadow release
+        run: RELEASE_MODE=shadow docker compose --profile app up -d --wait app
+      - name: End-to-end tests (shadow release)
+        run: |
+          python -m pytest -q -m e2e tests/e2e/test_release.py -rs | tee e2e-shadow.log
+          ! grep -q SKIPPED e2e-shadow.log
+        env:
+          E2E_BASE_URL: http://localhost:5000
+          E2E_PROMETHEUS_URL: http://localhost:9090
+          E2E_RELEASE_MODE: shadow
+      - name: Canary release (all requests to the candidate)
+        run: RELEASE_MODE=canary CANARY_PERCENT=100 docker compose --profile app up -d --wait app
+      - name: End-to-end tests (canary release)
+        run: |
+          python -m pytest -q -m e2e tests/e2e/test_release.py -rs | tee e2e-canary.log
+          ! grep -q SKIPPED e2e-canary.log
+        env:
+          E2E_BASE_URL: http://localhost:5000
+          E2E_PROMETHEUS_URL: http://localhost:9090
+          E2E_RELEASE_MODE: canary
       - if: failure()
-        run: docker compose --profile app logs --tail 200
+        run: docker compose --profile app --profile monitoring logs --tail 200
 
   lint:
     runs-on: ubuntu-latest
@@ -128,7 +180,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose config --quiet
+      - run: docker compose --profile app --profile monitoring config --quiet
       - run: docker build -t object-counter .
       - name: Smoke-test the image (fake detector)
         run: |
@@ -139,6 +191,8 @@ jobs:
           curl -fsS localhost:5000/health
           curl -fsS localhost:5000/health/ready
           curl -fsS "localhost:5000/object-counts?object_class=cat"
+          curl -fsS localhost:5000/metrics | grep -q '^objects_counted_total{object_class="cat"}'
+          curl -fsS -D - -o /dev/null -H "X-Request-ID: smoke-1" localhost:5000/health | grep -qi '^x-request-id: smoke-1'
           curl -fsS -o /dev/null localhost:5000/openapi.yaml
           curl -fsS -o /dev/null localhost:5000/docs/
       - if: failure()

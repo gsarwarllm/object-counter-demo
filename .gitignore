@@ -4,3 +4,6 @@
 spikes
 *.pyc
 .venv-models
+
+# coverage data from make coverage
+.coverage

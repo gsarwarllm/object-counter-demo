@@ -1,0 +1,10 @@
+{
+  "name": "coco_sample",
+  "description": "Image-level labels (which COCO classes are visible) for the three sample images. Enough to exercise the quality gate; a real gate needs hundreds of labelled images like the production traffic.",
+  "images_dir": "../../resources/images",
+  "labels": {
+    "boy.jpg": ["person", "tennis racket", "sports ball"],
+    "cat.jpg": ["cat", "car", "bicycle", "bottle"],
+    "food.jpg": ["bowl", "cup", "dining table", "spoon"]
+  }
+}

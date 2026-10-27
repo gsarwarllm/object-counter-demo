@@ -4,10 +4,12 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from prometheus_client import REGISTRY
 
 from counter.adapters.count_repo import CountInMemoryRepo
-from counter.adapters.detector_registry import DetectorRegistry, ServedModel
+from counter.adapters.detector_registry import Candidate, DetectorRegistry, ServedModel
 from counter.adapters.object_detector import FakeObjectDetector
+from counter.config import ReleaseSettings
 from counter.domain.errors import DetectorUnavailableError, RepositoryUnavailableError
 from counter.domain.models import Box, Prediction
 from counter.entrypoints.webapp import create_app
@@ -204,7 +206,7 @@ def test_logs_what_it_serves_at_startup(caplog):
 
     assert caplog.messages == [
         "Serving models cat_model@3, dog_model@latest (default cat_model), env=dev, "
-        "count repo=CountInMemoryRepo, debug images=off"
+        "count repo=CountInMemoryRepo, prediction log=InMemoryPredictionLog, debug images=off"
     ]
 
 
@@ -441,3 +443,184 @@ def test_readiness_survives_an_unexpected_error():
 
     assert response.status_code == 503
     assert response.get_json()["checks"]["detectors"] == {"m": "unavailable"}
+
+
+def test_generates_a_request_id(client):
+    response = client.get("/health")
+
+    assert len(response.headers["X-Request-ID"]) == 32
+
+
+@pytest.mark.parametrize(
+    ("incoming", "kept"), [("abc-123.x_Y", True), ("has spaces", False), ("x" * 129, False)]
+)
+def test_keeps_only_a_well_formed_request_id(client, incoming, kept):
+    returned = client.get("/health", headers={"X-Request-ID": incoming}).headers["X-Request-ID"]
+
+    assert (returned == incoming) is kept
+
+
+def test_request_id_is_also_set_on_errors(client):
+    response = client.get("/nope", headers={"X-Request-ID": "trace-404"})
+
+    assert response.status_code == 404
+    assert response.headers["X-Request-ID"] == "trace-404"
+
+
+def metric(name, **labels):
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+def test_records_http_and_business_metrics(client, image_path):
+    ok = {"method": "POST", "route": "/object-count", "status": "200"}
+    requests_before = metric("http_requests_total", **ok)
+    cats_before = metric("objects_counted_total", object_class="cat")
+    unmatched_before = metric("http_requests_total", method="GET", route="unmatched", status="404")
+
+    count_image(client, image_path)
+    client.get("/no/such/path")
+
+    assert metric("http_requests_total", **ok) == requests_before + 1
+    assert metric("objects_counted_total", object_class="cat") == cats_before + 1
+    # Unknown URLs share one label value, so random paths can't create new time series.
+    assert (
+        metric("http_requests_total", method="GET", route="unmatched", status="404")
+        == unmatched_before + 1
+    )
+
+
+def test_metrics_endpoint_serves_the_prometheus_format(client, image_path):
+    count_image(client, image_path)
+
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.mimetype == "text/plain"
+    text = response.get_data(as_text=True)
+    assert 'detector_requests_total{model="ssd_mobilenet_v2",outcome="ok",version="latest"}' in text
+    assert "http_request_duration_seconds_bucket" in text
+
+
+def test_metrics_report_drift_against_the_baseline(monkeypatch, tmp_path, image_path):
+    from counter.monitoring.baseline import Baseline, save_baseline
+    from counter.monitoring.drift import distributions
+    from tests.monitoring.helpers import confident_cats
+
+    monkeypatch.setenv("BASELINES_DIR", str(tmp_path))
+    monkeypatch.setenv("DRIFT_MIN_IMAGES", "1")
+    monkeypatch.setenv("DRIFT_CACHE_SECONDS", "0")
+    save_baseline(
+        Baseline("ssd_mobilenet_v2", "latest", "t", "test", distributions(confident_cats(20))),
+        tmp_path,
+    )
+
+    with create_app().test_client() as client:
+        count_image(client, image_path)
+        text = client.get("/metrics").get_data(as_text=True)
+
+    for feature in ("scores", "detections", "classes"):
+        assert (
+            f'model_drift_psi{{feature="{feature}",model="ssd_mobilenet_v2",version="latest"}}'
+            in text
+        )
+    assert 'model_drift_window_images{model="ssd_mobilenet_v2",version="latest"} 1.0' in text
+    assert 'model_drift_window_images{model="acme_shelf_detector"' not in text  # no baseline
+
+
+def dog_detector():
+    detector = Mock()
+    detector.predict.return_value = [Prediction("dog", 0.9, Box(0, 0, 1, 1))]
+    return detector
+
+
+def release_app(mode, candidate, canary_percent=100.0):
+    """Serves model "m": champion v1 (always a cat), candidate v2 released in the given mode."""
+    detectors = DetectorRegistry(
+        [ServedModel("m", "1", FakeObjectDetector(), Candidate("2", candidate))], "m"
+    )
+    release = ReleaseSettings(mode, canary_percent, shadow_workers=1, shadow_max_pending=4)
+    return create_app(detectors=detectors, count_repo=CountInMemoryRepo(), release=release)
+
+
+def detector_calls(version, outcome="ok"):
+    labels = {"model": "m", "version": version, "outcome": outcome}
+    return REGISTRY.get_sample_value("detector_requests_total", labels) or 0.0
+
+
+def test_without_a_release_mode_the_candidate_is_not_used(image_path):
+    candidate = dog_detector()
+    app = release_app("off", candidate)
+
+    with app.test_client() as client:
+        response = post(client, "/object-predictions", {"file": image_file(image_path)})
+        models = client.get("/models").get_json()
+
+    assert response.get_json()["model"] == {"name": "m", "version": "1"}
+    assert models["models"] == [{"name": "m", "version": "1"}]
+    candidate.predict.assert_not_called()
+
+
+@pytest.mark.parametrize("path", ENDPOINTS)
+def test_shadow_answers_with_the_champion_and_calls_the_candidate(image_path, path):
+    candidate = dog_detector()
+    app = release_app("shadow", candidate)
+    before = detector_calls("2")
+
+    with app.test_client() as client:
+        response = post(client, path, {"threshold": "0.5", "file": image_file(image_path)})
+    app.extensions["shadow_pool"].shutdown()
+
+    body = response.get_json()
+    assert body["model"] == {"name": "m", "version": "1"}
+    assert "dog" not in str(body)
+    candidate.predict.assert_called_once()
+    assert detector_calls("2") == before + 1  # recorded under the candidate's version
+
+
+def test_canary_answers_with_the_candidate_for_its_share(image_path):
+    app = release_app("canary", dog_detector(), canary_percent=100)
+
+    with app.test_client() as client:
+        response = post(client, "/object-count", {"file": image_file(image_path)})
+
+    assert response.get_json()["model"] == {"name": "m", "version": "2"}
+    assert response.get_json()["current_objects"] == [{"object_class": "dog", "count": 1}]
+
+
+def test_canary_falls_back_to_the_champion_when_the_candidate_is_down(image_path):
+    candidate = Mock()
+    candidate.predict.side_effect = DetectorUnavailableError("connection refused")
+    app = release_app("canary", candidate, canary_percent=100)
+
+    with app.test_client() as client:
+        response = post(client, "/object-count", {"file": image_file(image_path)})
+
+    assert response.status_code == 200
+    assert response.get_json()["model"] == {"name": "m", "version": "1"}
+    assert detector_calls("2", "unavailable") >= 1
+
+
+@pytest.mark.parametrize(
+    ("mode", "release"),
+    [
+        ("shadow", {"mode": "shadow", "candidate_version": "2"}),
+        ("canary", {"mode": "canary", "candidate_version": "2", "canary_percent": 25.0}),
+    ],
+)
+def test_models_and_metrics_show_the_release(mode, release):
+    app = release_app(mode, dog_detector(), canary_percent=25)
+
+    with app.test_client() as client:
+        models = client.get("/models").get_json()
+        text = client.get("/metrics").get_data(as_text=True)
+
+    assert models["models"] == [{"name": "m", "version": "1", "release": release}]
+    assert f'model_release_info{{mode="{mode}",model="m",role="champion",version="1"}} 1.0' in text
+    assert f'model_release_info{{mode="{mode}",model="m",role="candidate",version="2"}} 1.0' in text
+
+
+def test_logs_the_release_at_startup(caplog):
+    with caplog.at_level(logging.INFO, logger="counter.entrypoints.webapp"):
+        release_app("canary", dog_detector(), canary_percent=10)
+
+    assert caplog.messages[0].startswith("Serving models m@1 (candidate 2, canary 10%) (default m)")

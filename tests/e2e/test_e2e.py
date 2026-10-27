@@ -9,6 +9,7 @@ properties: the expected class is found, scores are sorted and in range, boxes a
 import io
 import json
 import os
+import time
 from pathlib import Path
 
 import psycopg
@@ -17,6 +18,7 @@ import yaml
 from openapi_core import Config, OpenAPI
 from openapi_core.contrib.requests import RequestsOpenAPIRequest, RequestsOpenAPIResponse
 from PIL import Image
+from prometheus_client.parser import text_string_to_metric_families
 from pymongo import MongoClient
 
 pytestmark = pytest.mark.e2e
@@ -201,3 +203,61 @@ def test_object_counts_reads_the_same_totals(api, base_url):
     assert only_cats == [{"object_class": "cat", "count": expected["cat"]}]
     if (stored := database_totals()) is not None:
         assert stored == expected
+
+
+def test_metrics_and_request_ids(api, base_url):
+    response = post(api, base_url, "/object-predictions", threshold="0.5")
+    traced = api.get(f"{base_url}/health", headers={"X-Request-ID": "e2e-trace-1"}, timeout=10)
+    metrics = api.get(f"{base_url}/metrics", timeout=10).text
+
+    assert len(response.headers["X-Request-ID"]) == 32  # generated when the client sends none
+    assert traced.headers["X-Request-ID"] == "e2e-trace-1"
+    # Served by gunicorn with several workers: the counters are added up across them.
+    samples = {
+        (sample.name, tuple(sorted(sample.labels.items()))): sample.value
+        for family in text_string_to_metric_families(metrics)
+        for sample in family.samples
+    }
+    version = json.loads(LOCK.read_text())[DEFAULT_MODEL]
+    detector_ok = (("model", DEFAULT_MODEL), ("outcome", "ok"), ("version", version))
+    assert samples[("detector_requests_total", detector_ok)] >= 1
+    http_ok = (("method", "POST"), ("route", "/object-predictions"), ("status", "200"))
+    assert samples[("http_requests_total", http_ok)] >= 1
+
+
+def test_predictions_are_logged_and_compared_with_the_baseline(api, base_url):
+    """CI computes the baselines (`baseline`) right after the stack starts, with
+    DRIFT_MIN_IMAGES=1 so the drift of a few requests is reported."""
+    version = json.loads(LOCK.read_text())[DEFAULT_MODEL]
+    post(api, base_url, "/object-predictions", threshold="0.5")
+
+    logged = _wait_for_logged_predictions(DEFAULT_MODEL, version)
+    samples = {
+        (sample.name, tuple(sorted(sample.labels.items()))): sample.value
+        for family in text_string_to_metric_families(
+            api.get(f"{base_url}/metrics", timeout=10).text
+        )
+        for sample in family.samples
+    }
+
+    assert logged[1] > 1  # every raw score is kept, not only those above the threshold
+    # Prediction features, and input features from the image statistics (X4)
+    for feature in ("scores", "detections", "classes", "brightness", "color_mode"):
+        labels = (("feature", feature), ("model", DEFAULT_MODEL), ("version", version))
+        assert samples[("model_drift_psi", labels)] >= 0
+
+
+def _wait_for_logged_predictions(model: str, version: str, timeout: float = 15.0):
+    """(rows, most scores in one row) once a row exists; records are written in the background."""
+    deadline = time.monotonic() + timeout
+    while True:
+        with psycopg.connect("host=localhost dbname=counter user=counter password=counter") as c:
+            logged = c.execute(
+                "SELECT count(*), max(cardinality(scores)) FROM prediction_logs "
+                "WHERE model = %s AND version = %s",
+                (model, version),
+            ).fetchone()
+        if logged[0] >= 1 or time.monotonic() > deadline:
+            assert logged[0] >= 1, f"no prediction of {model}@{version} logged"
+            return logged
+        time.sleep(0.5)

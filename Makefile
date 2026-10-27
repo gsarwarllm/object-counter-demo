@@ -14,7 +14,7 @@ REGISTRY := scripts/model_registry.py
 export PYTHONPATH := .
 
 .DEFAULT_GOAL := help
-.PHONY: help setup lock typecheck run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test coverage test-integration test-models e2e-up test-e2e e2e docs lint format security check clean
+.PHONY: help setup lock typecheck monitoring baseline drift evaluate canary-check canary-promote run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test coverage test-integration test-models e2e-up test-e2e e2e docs lint format security check clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -51,8 +51,23 @@ publish-models: ## Register downloaded models as new versions in the local MLflo
 pull-models: ## Pull each model's aliased version into tmp/model and write the TF Serving config
 	$(MPY) $(REGISTRY) pull
 
-promote-model: ## Point an alias at a version: make promote-model MODEL=name VERSION=2 [ALIAS=champion]
-	$(MPY) $(REGISTRY) promote $(MODEL) $(VERSION) --alias $(or $(ALIAS),champion)
+promote-model: ## Point an alias at a version: make promote-model MODEL=name VERSION=2 [ALIAS=champion] [FORCE=1]
+	$(MPY) $(REGISTRY) promote $(MODEL) $(VERSION) --alias $(or $(ALIAS),champion) $(if $(FORCE),--force)
+
+baseline: ## Drift baselines: run resources/images through each served version (needs `make up`), store in MLflow
+	$(MPY) $(REGISTRY) baseline $(if $(IMAGES),--images $(IMAGES))
+
+evaluate: ## Quality gate input: make evaluate MODEL=name VERSION=2 [DATASET=file] (version served by TF Serving)
+	$(MPY) $(REGISTRY) evaluate $(MODEL) $(VERSION) $(if $(DATASET),--dataset $(DATASET))
+
+drift: ## Drift report per served model version (JSON; PREDICTION_LOG and BASELINES_DIR as for the app)
+	$(PY) -m counter.entrypoints.drift
+
+canary-check: ## Compare a released candidate with the champion in Prometheus: make canary-check MODEL=name [WINDOW=1h]
+	$(PY) -m counter.entrypoints.release_check $(MODEL) --window $(or $(WINDOW),1h)
+
+canary-promote: canary-check ## canary-check, then promote the candidate to champion (still quality-gated); then pull-models
+	$(MPY) $(REGISTRY) promote $(MODEL) candidate
 
 mlflow-ui: ## Browse the local model registry at http://127.0.0.1:5001
 	MLFLOW_DISABLE_AGENT_HINT=1 $(MODELS_VENV)/bin/mlflow ui --backend-store-uri sqlite:///tmp/mlflow/registry.db --host 127.0.0.1 --port 5001
@@ -60,8 +75,11 @@ mlflow-ui: ## Browse the local model registry at http://127.0.0.1:5001
 up: ## Start TF Serving, MongoDB and PostgreSQL in Docker and wait until they are healthy
 	docker compose up -d --wait
 
-down: ## Stop the Docker services
-	docker compose down
+down: ## Stop the Docker services (all profiles)
+	docker compose --profile app --profile monitoring down
+
+monitoring: ## Whole stack plus Prometheus (:9090) and Grafana (:3000, dashboard "Object Counter")
+	docker compose --profile app --profile monitoring up -d --build --wait
 
 logs: ## Follow the Docker service logs
 	docker compose logs -f
@@ -78,11 +96,14 @@ test-integration: ## Repo tests against real Postgres/Mongo (Docker, or TEST_POS
 test-models: ## Model registry script tests against a temporary MLflow registry (needs setup-models)
 	ENV=dev $(MPY) -m pytest -q -m models
 
-e2e-up: ## Build and start the whole stack in Docker (app, TF Serving, MongoDB, PostgreSQL)
-	docker compose --profile app up -d --build --wait
+e2e-up: ## Build and start the whole stack in Docker (app, TF Serving, databases, monitoring)
+	docker compose --profile app --profile monitoring up -d --build --wait
 
 test-e2e: ## End-to-end tests against the running stack (E2E_COUNT_REPO=mongo|postgres also checks the DB)
-	E2E_BASE_URL=$(or $(E2E_BASE_URL),http://localhost:5000) $(PY) -m pytest -q -m e2e -rs
+	E2E_BASE_URL=$(or $(E2E_BASE_URL),http://localhost:5000) \
+	E2E_PROMETHEUS_URL=$(or $(E2E_PROMETHEUS_URL),http://localhost:9090) \
+	E2E_GRAFANA_URL=$(or $(E2E_GRAFANA_URL),http://localhost:3000) \
+	$(PY) -m pytest -q -m e2e -rs
 
 e2e: e2e-up test-e2e ## Start the stack and run the end-to-end tests (run `make models` first)
 

@@ -11,6 +11,7 @@ markers = [
     "integration: needs Docker (real databases via testcontainers)",
     "models: needs MLflow (requirements-models.txt): model registry scripts",
     "e2e: needs the running stack (make e2e); black-box HTTP tests with the real models",
+    "release_mode(mode): e2e test for RELEASE_MODE=mode; deselected unless E2E_RELEASE_MODE=mode",
 ]
 
 [tool.coverage.run]

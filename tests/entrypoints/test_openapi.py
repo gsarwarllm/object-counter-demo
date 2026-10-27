@@ -13,7 +13,9 @@ from openapi_core.contrib.werkzeug import WerkzeugOpenAPIRequest, WerkzeugOpenAP
 from openapi_spec_validator import validate
 
 from counter.adapters.count_repo import CountInMemoryRepo
-from counter.adapters.detector_registry import DetectorRegistry, ServedModel
+from counter.adapters.detector_registry import Candidate, DetectorRegistry, ServedModel
+from counter.adapters.object_detector import FakeObjectDetector
+from counter.config import ReleaseSettings
 from counter.domain.errors import DetectorUnavailableError, RepositoryUnavailableError
 from counter.entrypoints.webapp import OPENAPI_SPEC, create_app
 
@@ -23,7 +25,14 @@ SPEC = yaml.safe_load(OPENAPI_SPEC.read_text())
 VALIDATOR = OpenAPI.from_dict(
     SPEC, config=Config(extra_media_type_deserializers={"application/problem+json": json.loads})
 )
-NON_API_ROUTES = {"/static/<path:filename>", "/docs/", "/docs/<path:path>", "/openapi.yaml"}
+# Served for operators and tools, outside the API contract
+NON_API_ROUTES = {
+    "/static/<path:filename>",
+    "/docs/",
+    "/docs/<path:path>",
+    "/openapi.yaml",
+    "/metrics",
+}
 
 
 def image_form(**fields):
@@ -163,6 +172,31 @@ def test_response_matches_the_spec(monkeypatch, method, path, status, make_app, 
             )
 
     assert response.status_code == status
+    VALIDATOR.validate_response(
+        WerkzeugOpenAPIRequest(response.request), WerkzeugOpenAPIResponse(response)
+    )
+
+
+@pytest.mark.parametrize("mode", ["shadow", "canary"])
+@pytest.mark.parametrize("path", ["/models", "/object-count", "/object-predictions"])
+def test_responses_during_a_release_match_the_spec(mode, path):
+    """GET /models gains a release object; a canary answer names the candidate's version."""
+    detectors = DetectorRegistry(
+        [ServedModel("m", "1", FakeObjectDetector(), Candidate("2", FakeObjectDetector()))], "m"
+    )
+    app = create_app(
+        detectors=detectors,
+        count_repo=CountInMemoryRepo(),
+        release=ReleaseSettings(mode, 100, shadow_workers=1, shadow_max_pending=4),
+    )
+    with app.test_client() as client:
+        if path == "/models":
+            response = client.get(path)
+        else:
+            response = client.post(path, data=image_form(), content_type="multipart/form-data")
+    app.extensions["shadow_pool"].shutdown()
+
+    assert response.status_code == 200
     VALIDATOR.validate_response(
         WerkzeugOpenAPIRequest(response.request), WerkzeugOpenAPIResponse(response)
     )

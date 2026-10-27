@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Object Counter API
-  version: 1.2.0
+  version: 1.3.0
   description: >
     Detects objects in an image, counts those whose confidence score is at or above a
     threshold (grouped by class) and keeps accumulated totals. Several models can be served
@@ -111,7 +111,9 @@ paths:
               example:
                 default_model: ssd_mobilenet_v2
                 models:
-                  - { name: acme_shelf_detector, version: '1' }
+                  - name: acme_shelf_detector
+                    version: '1'
+                    release: { mode: canary, candidate_version: '2', canary_percent: 10 }
                   - { name: ssd_mobilenet_v2, version: '1' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -265,8 +267,23 @@ components:
         version:
           type: string
           nullable: true
-          description: Registry version served by TF Serving; null in dev, where fake detectors answer
+          description: >
+            Registry version served by TF Serving; null in dev, where fake detectors answer.
+            During a canary release, the version that answered this request
           example: '1'
+        release: { $ref: '#/components/schemas/ModelRelease' }
+    ModelRelease:
+      type: object
+      description: >
+        Only in GET /models, while a candidate version is being released next to the champion
+        (`version`). shadow: the candidate gets a background copy of each request and the client
+        always gets the champion's answer. canary: `canary_percent` % of requests are answered
+        by the candidate (the response's `model.version` says which).
+      required: [mode, candidate_version]
+      properties:
+        mode: { type: string, enum: [shadow, canary] }
+        candidate_version: { type: string, example: '2' }
+        canary_percent: { type: number, minimum: 0, maximum: 100, example: 10 }
     ModelsResponse:
       type: object
       required: [default_model, models]
