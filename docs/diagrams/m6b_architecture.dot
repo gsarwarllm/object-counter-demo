@@ -1,0 +1,93 @@
+digraph M6B {
+    graph [rankdir=TB, splines=spline, nodesep=0.35, ranksep=0.75, fontname="DejaVu Sans", fontsize=20,
+           bgcolor="white", pad=0.4, newrank=true,
+           label=<<B>Multi-framework model serving for object-counter (Task 6b, proposed design)</B>>, labelloc=t, fontcolor="#1F4E79"];
+    node  [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=15, margin="0.22,0.12", penwidth=2];
+    edge  [color="#37474F", penwidth=1.8, arrowsize=0.9, fontname="DejaVu Sans", fontsize=13, fontcolor="#263238"];
+
+    client [label=<<B>Client</B><BR/>POST /object-count<BR/>POST /object-predictions<BR/>GET /models>, fillcolor="#E3F2FD", color="#1E88E5", fontcolor="#0D47A1"];
+
+    subgraph cluster_app {
+        label=<<B>object-counter app (unchanged by 6b)</B>>; fontsize=15; fontcolor="#0D47A1";
+        style="rounded,filled"; fillcolor="#F5FAFF"; color="#1E88E5"; penwidth=1.5;
+        api     [label=<<B>Flask entrypoints</B><BR/>webapp.py>, fillcolor="#E3F2FD", color="#1E88E5", fontcolor="#0D47A1"];
+        actions [label=<<B>Domain actions</B><BR/>CountDetectedObjects<BR/>DetectObjects>, fillcolor="#E3F2FD", color="#1E88E5", fontcolor="#0D47A1"];
+        factory [label=<<B>DetectorFactory</B><BR/>picks a builder by the <I>serving</I> field<BR/>in models/models.json<BR/>(today: tfserving, fake)>, fillcolor="#FAFAFA", color="#546E7A", fontcolor="#212121"];
+        registry [label=<<B>DetectorRegistry</B><BR/>one detector per model,<BR/>looked up by model_name<BR/>(default model if none given)>, fillcolor="#FAFAFA", color="#546E7A", fontcolor="#212121"];
+        port    [label=<<B>ObjectDetector port</B><BR/>predict(image) → list of Prediction>, fillcolor="#BBDEFB", color="#0D47A1", fontcolor="#0D47A1", penwidth=3.5];
+        { rank=same; actions; registry; factory; }
+    }
+
+    subgraph cluster_adapters {
+        label=<<B>Adapters: one per protocol, not per framework</B>>; labelloc=b; fontsize=15; fontcolor="#1B5E20";
+        style="rounded,filled"; fillcolor="#F7FCF7"; color="#43A047"; penwidth=1.5;
+        tfsA    [label=<<B>TFSObjectDetector</B><BR/>TF Serving REST API>, fillcolor="#FAFAFA", color="#546E7A", fontcolor="#212121"];
+        kserveA [label=<<B>KServeV2ObjectDetector</B> (proposed)<BR/>builders: ovms, triton<BR/>per-model pre/post-processing<BR/>from the manifest>, fillcolor="#FFF3E0", color="#FB8C00", fontcolor="#BF360C", style="rounded,filled,dashed", penwidth=2.5];
+        fakeA   [label=<<B>FakeObjectDetector</B><BR/>dev and unit tests>, fillcolor="#FAFAFA", color="#546E7A", fontcolor="#212121"];
+    }
+
+    subgraph cluster_servers {
+        label=<<B>Model servers</B>>; labelloc=b; fontsize=15; fontcolor="#263238";
+        style="rounded,filled"; fillcolor="#FBFBFB"; color="#78909C"; penwidth=1.5;
+        tfserving [label=<<B>TF Serving</B> (existing)<BR/>TF SavedModels:<BR/>ssd_mobilenet_v2, acme_shelf_detector>, fillcolor="#FAFAFA", color="#546E7A", fontcolor="#212121"];
+        ovms      [label=<<B>OpenVINO Model Server</B> (proposed)<BR/>ONNX SSD-MobileNet on CPU<BR/>first step if built>, fillcolor="#FFF3E0", color="#FB8C00", fontcolor="#BF360C", style="rounded,filled,dashed", penwidth=2.5];
+        triton    [label=<<B>Triton Inference Server</B> (proposed)<BR/>example config.pbtxt>, fillcolor="#FFF3E0", color="#FB8C00", fontcolor="#BF360C", style="rounded,filled,dashed"];
+    }
+
+    subgraph cluster_backends {
+        label=<<B>Triton backends: chosen per model in config.pbtxt</B>>; fontsize=15; fontcolor="#BF360C";
+        style="rounded,filled"; fillcolor="#FFFAF3"; color="#FB8C00"; penwidth=1.5;
+        node [fillcolor="#FFF3E0", color="#FB8C00", fontcolor="#BF360C", style="rounded,filled,dashed"];
+        onnx  [label=<<B>ONNX Runtime</B>>];
+        torch [label=<<B>PyTorch</B><BR/>TorchScript>];
+        tf    [label=<<B>TensorFlow</B><BR/>deprecated from 25.03<BR/>(25.02 is the last release)>];
+        ov    [label=<<B>OpenVINO</B>>];
+        trt   [label=<<B>TensorRT</B><BR/>GPU only>];
+    }
+
+    subgraph cluster_hw {
+        label=<<B>Hardware</B>>; labelloc=b; fontsize=15; fontcolor="#4A148C";
+        style="rounded,filled"; fillcolor="#FCF8FD"; color="#8E24AA"; penwidth=1.5;
+        cpu [label=<<B>CPU</B><BR/>(this project; Triton: KIND_CPU)>, fillcolor="#F3E5F5", color="#8E24AA", fontcolor="#4A148C", penwidth=2.5];
+        gpu [label=<<B>NVIDIA GPU</B><BR/>(production option; Triton: KIND_GPU)>, fillcolor="#F3E5F5", color="#8E24AA", fontcolor="#4A148C", style="rounded,filled,dashed"];
+    }
+
+    legend [shape=plain, label=<
+      <TABLE BORDER="1" COLOR="#90A4AE" CELLBORDER="0" CELLSPACING="2" CELLPADDING="5" BGCOLOR="white">
+        <TR><TD ALIGN="LEFT" COLSPAN="2"><B>Key</B></TD></TR>
+        <TR><TD ALIGN="LEFT"><FONT COLOR="#37474F"><B>───</B></FONT></TD><TD ALIGN="LEFT">Exists today: runs on CPU, tested in CI</TD></TR>
+        <TR><TD ALIGN="LEFT"><FONT COLOR="#37474F"><B>- - -</B></FONT></TD><TD ALIGN="LEFT">Proposed: outline in ANSWERS.md, not built</TD></TR>
+                <TR><TD BGCOLOR="#FFF3E0" BORDER="1" COLOR="#FB8C00">   </TD><TD ALIGN="LEFT">Proposed for 6b</TD></TR>
+        <TR><TD BGCOLOR="#FAFAFA" BORDER="1" COLOR="#546E7A">   </TD><TD ALIGN="LEFT">Existing code</TD></TR>
+      </TABLE>>];
+
+    { rank=same; client; legend; }
+    { rank=same; tfsA; kserveA; fakeA; }
+    { rank=same; tfserving; ovms; triton; }
+    { rank=same; onnx; torch; tf; ov; trt; }
+    { rank=same; cpu; gpu; }
+
+    client -> api;
+    api -> actions -> port;
+    api -> registry [label=" get(model_name)"];
+    factory -> registry [label=" builds one per model"];
+    registry -> port [label=" holds ObjectDetector instances"];
+    port -> tfsA; port -> kserveA [style=dashed]; port -> fakeA;
+    tfsA -> tfserving;
+    kserveA -> ovms [style=dashed, label=" KServe v2"];
+    kserveA -> triton [style=dashed, label=" KServe v2"];
+    triton -> {onnx torch tf ov trt} [style=dashed];
+    tfserving -> cpu [penwidth=2.4];
+    ovms -> cpu [style=dashed];
+    {onnx torch tf ov} -> cpu [style=dashed];
+    {onnx torch tf trt} -> gpu [style=dashed];
+
+    // keep the legend off the main flow
+    legend -> api [style=invis];
+
+    modelsrc [shape=note, label=<<B>ONNX model source (proposed)</B><BR/>public ONNX SSD-MobileNet<BR/>→ make publish-models (MLflow, Task 5)<BR/>→ make pull-models (models.lock.json)<BR/>→ <I>serving: ovms</I> in models.json<BR/>Same outputs as the TF model:<BR/>detection_boxes, detection_classes,<BR/>detection_scores, num_detections>,
+              style=filled, fillcolor="#FFFDE7", color="#F9A825", fontcolor="#33302A", fontsize=13, penwidth=1.5];
+    { rank=same; modelsrc; ov; }
+    modelsrc -> ov [style=invis];
+    ovms -> modelsrc [style=dotted, arrowhead=none, color="#F9A825", penwidth=2.2, constraint=false];
+}

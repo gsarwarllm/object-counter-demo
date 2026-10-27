@@ -693,17 +693,23 @@ the summary in `docs/ANSWERS.md` (Task 6(a)). Differences from the sketch above:
 
 #### 6(b) Multiple deep-learning frameworks (outline only, in `docs/ANSWERS.md`)
 
-1. The `ObjectDetector` port already isolates the framework. Add one adapter per backend, all
-   returning `List[Prediction]`: `TFSObjectDetector` (exists), `TorchServeObjectDetector`,
-   `OnnxRuntimeObjectDetector` (in-process), or one `TritonObjectDetector`. NVIDIA Triton
-   serves TensorFlow, PyTorch, ONNX and TensorRT behind one API, which is the simplest to run.
-2. Per-model pre-processing (resize, normalise, channel order) and post-processing (box order
-   `[ymin,xmin,ymax,xmax]` vs `[xmin,ymin,xmax,ymax]`, pixel vs normalised coordinates,
-   class-id offset, label map) as strategy classes chosen from `model.yaml`.
-3. `DetectorRegistry` (M5) builds the right adapter from `framework:` in `model.yaml`.
-4. A shared adapter contract test suite: every adapter must return valid `Prediction`s
-   (boxes in `[0,1]`, scores in `[0,1]`, known class names).
-5. Docker Compose profiles per serving backend (`--profile torchserve`, `--profile triton`).
+**Status:** done as an outline (user decision 2026-10-27: not implemented, to avoid a third serving
+container, a second model format and a heavier CI job for an optional task). Diagram:
+`docs/diagrams/m6b_architecture.dot` (source) and `.svg`.
+
+1. The `ObjectDetector` port already isolates the framework, and since M5 the `serving` field in
+   `models/models.json` picks the adapter in `DetectorFactory`. Add **one adapter per serving
+   protocol, not per framework**: `KServeV2ObjectDetector` (KServe v2 REST), with builders `ovms`
+   (OpenVINO Model Server, CPU, small image: first step) and `triton` (Triton Inference Server:
+   ONNX Runtime, PyTorch, TensorFlow up to 25.02, OpenVINO, TensorRT; `KIND_CPU`/`KIND_GPU`).
+2. Per-model pre/post-processing in the manifest (input name/dtype/layout, output names, box order,
+   pixel vs normalised coordinates, class-id offset, label map); defaults match today's TF models.
+3. Model export: SavedModel, TorchScript, ONNX (`tf2onnx`, `torch.onnx.export`), TensorRT engines;
+   the M5 registry flow stays, `make pull-models` would also write `config.pbtxt` / OVMS `config.json`.
+4. Tests: unit, stub KServe v2 server (no Docker), shared adapter contract test, e2e with OVMS + an
+   ONNX SSD-MobileNet in CI; full Triton (15-20 GB image) and TensorRT only on a GPU runner.
+5. First step if built: a spike running OVMS with the ONNX model (risk: NMS/loop ops in the
+   converted model). Rough effort: 2-3 days (OVMS path incl. CI) + 1-2 days (Triton).
 
 ---
 

@@ -5,7 +5,7 @@ This file answers the written parts of the assignment (`Task.md`):
 - [Task 3: Code review and proposed improvements](#task-3-code-review-and-proposed-improvements) (with Task 4: which improvements are implemented)
 - [Task 5: Multiple internally trained models](#task-5-multiple-internally-trained-models)
 - [Task 6(a): Integration and end-to-end tests](#task-6a-integration-and-end-to-end-tests) (full strategy in [`TESTING.md`](TESTING.md))
-- Task 6b (multiple deep-learning frameworks): to be added
+- [Task 6(b): Multiple deep-learning frameworks (outline)](#task-6b-multiple-deep-learning-frameworks-outline) (design only, not built)
 
 ## Task 3: Code review and proposed improvements
 
@@ -221,3 +221,81 @@ The API-level concurrency test failed in 3 of 5 runs: on a fresh PostgreSQL data
 - **Unit and component tests** stay the bulk (fast, precise), possible because the hexagonal ports let every external system be replaced by a fake.
 - **Integration tests use the real technologies**, not substitutes like SQLite, because the risky parts are exactly the SQL, the HTTP protocol and concurrency.
 - **E2E tests are few and assert properties, not exact scores**: they prove the deployed image, Compose wiring, model loading and payload format work together, while exact model accuracy belongs to model evaluation.
+
+## Task 6(b): Multiple deep-learning frameworks (outline)
+
+> Support models for object detection using different deep learning frameworks. If the task seems too big, just lay out the main key points of the proposed solution.
+
+Task 6 asks for one of (a) or (b). (a) is implemented above; this section is an **outline only** ([#16](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/16)): nothing here is built. Implementing it would add a third serving container, a second model format in the registry scripts and a heavier CI job, for little extra evidence, because the seam it plugs into already exists and is tested (Task 5).
+
+### Short answer
+
+The application never needs to know which framework trained a model. It already talks only to the `ObjectDetector` port, and since Task 5 the `serving` field of each model in `models/models.json` decides which adapter is built. Supporting other frameworks means:
+
+1. Serve the models with a **multi-framework model server**: NVIDIA Triton Inference Server for the full range (ONNX Runtime, PyTorch, TensorFlow, OpenVINO and TensorRT backends), or OpenVINO Model Server as a lighter CPU-only first step.
+2. Add **one adapter per serving protocol, not per framework**: a `KServeV2ObjectDetector`, because both servers speak the KServe v2 inference protocol. Which framework runs a model is then server configuration, not application code.
+3. Describe each model's **input and output conventions in the manifest**, so models from different frameworks map to the same `Prediction`.
+
+The domain, the endpoints, the count repositories and the API contract don't change.
+
+### Architecture: multi-framework serving (proposed design)
+
+![Multi-framework model serving for object-counter](diagrams/m6b_architecture.svg)
+
+*Figure: How Task 6b would plug into the existing ports-and-adapters design. Solid lines exist today; dashed lines and orange boxes are proposed and not built. Source: [`docs/diagrams/m6b_architecture.dot`](diagrams/m6b_architecture.dot) (Graphviz).*
+
+**What this shows:** The app's domain code only talks to the `ObjectDetector` port. `DetectorFactory` reads the `serving` field of each model in `models/models.json` and builds one detector per model. `DetectorRegistry` holds those detectors. At startup the web layer builds one `CountDetectedObjects` / `DetectObjects` pair per model from the registry, and each request to `/object-count` or `/object-predictions` picks the pair by `model_name` (the default model if none is given). All of this exists today (Task 5). The proposal adds one adapter per *protocol*, not per framework: a `KServeV2ObjectDetector` that speaks the KServe v2 protocol (a standard request format for model servers), so the same code would work with both OpenVINO Model Server and Triton. Which framework runs a model (ONNX Runtime, PyTorch, TensorFlow, OpenVINO or TensorRT) is then decided by the model server's config, not by the app.
+
+**What exists and what is proposed:**
+- **Exists today (solid lines):** TF Serving with two TensorFlow SavedModels (`ssd_mobilenet_v2`, `acme_shelf_detector`), running on CPU and tested end to end in CI (Task 6a).
+- **Proposed (dashed lines):** the `KServeV2ObjectDetector` adapter with `ovms` and `triton` builders in `DetectorFactory`; OpenVINO Model Server as the first, lightweight CPU target; Triton Inference Server with an example `config.pbtxt` for the full multi-backend setup.
+- **Proposed model flow:** a public ONNX SSD-MobileNet goes through the existing Task 5 registry flow (`make publish-models` into MLflow, `make pull-models` writing `models.lock.json`) and is listed in `models.json` with `serving: ovms`. Its outputs (`detection_boxes`, `detection_classes`, `detection_scores`, `num_detections`) use the same format as the TF models, so the existing post-processing logic carries over.
+- **Version note:** Triton deprecated its TensorFlow backend from release 25.03 (25.02 is the last release with it; [release notes](https://docs.nvidia.com/deeplearning/triton-inference-server/release-notes/rel-25-03.html)). TensorFlow models would stay on TF Serving, be converted to ONNX, or need Triton pinned to 25.02. ONNX Runtime, PyTorch and OpenVINO run on CPU; TensorRT needs an NVIDIA GPU.
+
+**Why this design:** Once the KServe v2 adapter exists, adding a model from a new framework becomes a deploy step (add a model folder, its server config and a manifest entry), not new application code. The domain, endpoints and count repositories do not change, which is the separation ports and adapters is meant to give.
+
+### Key points of the solution
+
+**1. Adapters per protocol.** `KServeV2ObjectDetector` would send `POST /v2/models/{name}[/versions/{v}]/infer` with the image as a `UINT8` tensor of shape `[1, height, width, 3]`, read the named output tensors, and return `list[Prediction]`. It reuses what `TFSObjectDetector` already does: decoding any image mode to RGB, the pinned model version from `models.lock.json`, and turning HTTP, connection and malformed-response errors into `DetectorUnavailableError` (503). `DetectorFactory` gets two builders, `ovms` and `triton`, with their own host, port and timeout settings; `ENV=dev` keeps forcing the `fake` detector.
+
+**2. Per-model pre- and post-processing in the manifest.** Models from different frameworks disagree on details, so each manifest entry would describe them instead of the code assuming TensorFlow conventions:
+
+| Setting | Why it differs between models | Example |
+|---|---|---|
+| Input tensor name, dtype and layout | TF exports take `uint8` NHWC; PyTorch models usually take `float32` NCHW, normalised | `"input": "image_tensor:0"` |
+| Output tensor names | Each export names its outputs | `"boxes": "detection_boxes:0"` |
+| Box order | TF: `[ymin, xmin, ymax, xmax]`; torchvision: `[xmin, ymin, xmax, ymax]` | `"box_order": "yxyx"` |
+| Coordinates | Normalised `[0, 1]` or pixels (then divided by the image size) | `"box_scale": "normalized"` |
+| Class ids | COCO ids with or without a background class at 0 | `"class_id_offset": 0` |
+| Label map | Already per model since Task 5 | `"label_map": "labels/mscoco.json"` |
+
+Defaults would match today's TF models, so existing entries wouldn't change. If a model needs more than this (for example non-maximum suppression outside the graph), that work belongs in the model server (a Triton ensemble or a Python backend step), not in the app.
+
+**3. Model export and conversion.** Training teams hand over a format a server can run: TensorFlow as a SavedModel (TF Serving) or converted to ONNX with `tf2onnx`; PyTorch as TorchScript (Triton's PyTorch backend) or ONNX (`torch.onnx.export`); for NVIDIA GPUs, ONNX compiled to a TensorRT engine; for Intel CPUs, ONNX or OpenVINO IR. ONNX is the common exchange format, so most models can run on ONNX Runtime or OpenVINO without their training framework installed.
+
+**4. Registry and deployment.** The Task 5 flow stays: models are published to the MLflow registry, promoted with an alias, and pulled into `tmp/model/<name>/<version>/`, which is already the folder layout Triton and OpenVINO Model Server expect. `make pull-models` would additionally write each server's config (`config.pbtxt` per model for Triton, `config.json` for OpenVINO Model Server) next to today's TF Serving `model_config.config`, and the manifest gets a `format` field (`saved_model`, `onnx`, `torchscript`). The serving container is a new Docker Compose service, one per server used.
+
+**5. Testing.** Same levels as Task 6(a):
+- unit tests for the request body and response mapping (box order, class-id offset, unknown ids, malformed responses);
+- an HTTP integration test against a stub KServe v2 server with a recorded response, like `tests/integration/stub_tf_serving.py`, so it runs without Docker;
+- one shared adapter contract test that every adapter must pass (boxes and scores in `[0, 1]`, known class names);
+- e2e tests against the Compose stack with OpenVINO Model Server and the ONNX model on CPU (its image is small enough for CI). Full Triton (an image of 15-20 GB) and TensorRT (needs a GPU) would be tested on a GPU runner or a staging environment, not in the standard CI job.
+
+### Trade-offs
+
+| | TF Serving (today) | OpenVINO Model Server | Triton Inference Server |
+|---|---|---|---|
+| Frameworks | TensorFlow only | ONNX, OpenVINO IR, TensorFlow, PaddlePaddle | ONNX Runtime, PyTorch, TensorFlow (≤ 25.02), OpenVINO, TensorRT, Python |
+| Hardware | CPU, NVIDIA GPU | Intel CPU and GPU | CPU (`KIND_CPU`), NVIDIA GPU (`KIND_GPU`) |
+| Protocol | TF Serving REST | KServe v2 (and TF Serving API) | KServe v2 |
+| Image size | small | small | very large (15-20 GB) |
+| Extras | | | dynamic batching, ensembles, concurrent model execution, metrics |
+| Fit | existing models | first step: CPU, fits CI | production with GPUs or many frameworks |
+
+**Known trade-off:** KServe v2 JSON sends every pixel as a number, so one 640×480 image becomes several megabytes of JSON. The existing TF Serving adapter has the same cost, so it is acceptable here; in production the fix is KServe v2's binary data extension, which both OpenVINO Model Server and Triton support.
+
+### If it were built
+
+**The first step:** a small spike that starts OpenVINO Model Server with the ONNX model and sends one image, before writing any adapter code. The main open risk is whether OpenVINO's ONNX importer supports every operation in that converted model (it contains non-maximum suppression and loop operations). If it does not, the fallbacks are the opset-12 export of the model, or serving a different ONNX detector.
+
+**Then, in order:** the `KServeV2ObjectDetector` adapter and manifest settings with unit and stub-server tests; `format` support and server configs in `scripts/model_registry.py`; the OpenVINO Model Server Compose service and an e2e test for the ONNX model in CI; Triton `config.pbtxt` examples and a non-default Compose profile. Rough effort: two to three days for the OpenVINO path including CI, plus one to two days for Triton on a machine that can run its image.
