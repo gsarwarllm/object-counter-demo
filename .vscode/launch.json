@@ -5,7 +5,27 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Flask",
+            // Fake detector and in-memory counts: no services needed.
+            "name": "Python: Flask (dev)",
+            "type": "python",
+            "request": "launch",
+            "module": "flask",
+            "env": {
+                "FLASK_APP": "counter/entrypoints/webapp.py",
+                "FLASK_DEBUG": "1",
+                "ENV": "dev"
+            },
+            "args": [
+                "run",
+                "--no-debugger",
+                "--no-reload"
+            ],
+            "jinja": true,
+            "justMyCode": true
+        },
+        {
+            // Needs TF Serving, MongoDB and pulled models: `make up` and `make models`.
+            "name": "Python: Flask (prod)",
             "type": "python",
             "request": "launch",
             "module": "flask",

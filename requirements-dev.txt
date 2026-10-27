@@ -6,3 +6,5 @@ testcontainers==4.15.0
 openapi-core==0.23.1
 PyYAML==6.0.3
 pytest-cov==7.1.0
+mypy==2.4.0
+types-requests==2.33.0.20261006

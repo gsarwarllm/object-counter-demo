@@ -42,11 +42,18 @@ def failing_detector(error):
 
 
 class BrokenRegistry(DetectorRegistry):
-    """Fails while answering GET /models, to produce the documented 500."""
+    """Fails while answering GET /models, to produce the documented 500.
+
+    It breaks only after create_app(), which reads the registry for its startup log line.
+    """
+
+    broken = False
 
     @property
     def default_model(self):
-        raise RuntimeError("registry broken")
+        if self.broken:
+            raise RuntimeError("registry broken")
+        return super().default_model
 
 
 def default_app(monkeypatch):
@@ -68,7 +75,9 @@ def detector_crash_app(monkeypatch):
 
 def broken_registry_app(monkeypatch):
     registry = BrokenRegistry([ServedModel("only_model", "1", Mock())], "only_model")
-    return create_app(detectors=registry, count_repo=CountInMemoryRepo())
+    app = create_app(detectors=registry, count_repo=CountInMemoryRepo())
+    registry.broken = True
+    return app
 
 
 # (method, path, expected status, app factory, form fields; None = no body)

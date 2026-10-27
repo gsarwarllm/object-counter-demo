@@ -579,13 +579,13 @@ Deliverable: a section in `docs/ANSWERS.md`. The items implemented in M4 are mar
 - ✅ Makefile, docker-compose, Dockerfile, `.env.example`, `pyproject.toml`.
 - ✅ Fix `tmp/model/model_config.config` (references an unused `rfcn` model).
 - ✅ Split runtime and dev dependencies.
-- Pin transitive dependencies (lock file via `uv pip compile`).
-- `.vscode/launch.json` hard-codes `ENV=prod`; add a dev configuration.
+- ✅ Pin transitive dependencies (lock file via `uv pip compile`).
+- ✅ `.vscode/launch.json` hard-codes `ENV=prod`; add a dev configuration.
 
 **Code**
 - ✅ I1–I9 from M4.
-- `count()` in `domain/predictions.py` uses `reduce` with a module-private function; `collections.Counter` is simpler.
-- Type hints are incomplete (`execute(self, image, threshold)`); add them and run `mypy`.
+- ✅ `count()` in `domain/predictions.py` uses `reduce` with a module-private function; `collections.Counter` is simpler.
+- ✅ Type hints are incomplete (`execute(self, image, threshold)`); add them and run `mypy`.
 - The TF Serving REST payload is a huge JSON array of pixels; gRPC or base64 `b64` input would be faster.
 - `TFSObjectDetector` loads the label map in its constructor from a fixed file; make it injectable per model (needed for M5).
 

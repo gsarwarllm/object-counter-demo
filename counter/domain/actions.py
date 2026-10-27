@@ -11,7 +11,7 @@ class CountDetectedObjects:
         object_detector: ObjectDetector,
         object_count_repo: ObjectCountRepo,
         debug_image_writer: DebugImageWriter | None = None,
-    ):
+    ) -> None:
         self.__object_detector = object_detector
         self.__object_count_repo = object_count_repo
         self.__debug_image_writer = debug_image_writer
@@ -31,7 +31,7 @@ class DetectObjects:
         self,
         object_detector: ObjectDetector,
         debug_image_writer: DebugImageWriter | None = None,
-    ):
+    ) -> None:
         self.__object_detector = object_detector
         self.__debug_image_writer = debug_image_writer
 

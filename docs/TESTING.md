@@ -114,7 +114,7 @@ CI runs the suite twice: once with counts in MongoDB, then again after switching
 
 | Command | Runs | Needs | Time |
 |---|---|---|---|
-| `make test` (also the pre-push hook) | unit, component/API, contract, stub TF Serving integration: 124 tests | Python only | ~6 s |
+| `make test` (also the pre-push hook) | unit, component/API, contract, stub TF Serving integration: 133 tests | Python only | ~6 s |
 | `make coverage` | the same, with a coverage report; fails under 90% | Python only | ~9 s |
 | `make test-integration` | real PostgreSQL and MongoDB: 22 tests | Docker (or `TEST_*` servers) | ~1 min |
 | `make test-models` | model registry scripts against a throwaway MLflow registry: 4 tests | `make setup-models` | ~10 s |
@@ -141,13 +141,13 @@ Coverage shows what the tests **execute**, not what they **check**: a test with 
 | Level | Files | Tests | Tools |
 |---|---|---|---|
 | Unit: domain | `tests/domain/` | 10 | pytest, `unittest.mock` |
-| Unit / component: adapters | `tests/adapters/test_object_detector.py`, `test_models.py`, `test_debug_image_writer.py`, `test_count_repo_mongo.py`, repo-down tests in `test_count_repo_postgres.py` | 30 | pytest, `Mock`, Pillow |
-| Component: config and CLI | `tests/test_config.py`, `tests/entrypoints/test_cli.py` | 13 | pytest `monkeypatch`, `runpy` |
-| Component: API | `tests/entrypoints/test_webapp.py` | 32 | Flask test client |
+| Unit / component: adapters | `tests/adapters/test_object_detector.py`, `test_models.py`, `test_debug_image_writer.py`, `test_count_repo_mongo.py`, repo-down tests in `test_count_repo_postgres.py` | 32 | pytest, `Mock`, Pillow, `caplog` |
+| Component: config, logging and CLI | `tests/test_config.py`, `tests/test_logging_config.py`, `tests/entrypoints/test_cli.py` | 17 | pytest `monkeypatch`, `runpy` |
+| Component: API | `tests/entrypoints/test_webapp.py` | 35 | Flask test client, `caplog` (startup line, 503 cause, 500 traceback) |
 | Contract: API | `tests/entrypoints/test_openapi.py` | 17 | `openapi-core`, `openapi-spec-validator` |
 | Contract + integration: repositories | `tests/adapters/test_count_repo_contract.py` (memory, PostgreSQL, MongoDB), integration tests in `test_count_repo_postgres.py` | 20 (14 need Docker) | Testcontainers, psycopg, pymongo |
 | Integration: API + databases | `tests/integration/test_api_with_databases.py` | 8 | Testcontainers |
 | Integration: API + TF Serving over HTTP | `tests/integration/test_tf_serving_http.py` | 11 | stub HTTP server, recorded response |
 | Integration: model registry | `tests/scripts/test_model_registry.py` | 9 (4 need MLflow) | MLflow |
 | End-to-end | `tests/e2e/test_e2e.py` | 11 | Docker Compose, requests, `openapi-core` |
-| **Total** | | **161** | |
+| **Total** | | **170** | |

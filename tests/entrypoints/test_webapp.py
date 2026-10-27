@@ -1,4 +1,5 @@
 import io
+import logging
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -163,6 +164,48 @@ def test_returns_503_when_detector_is_down(image_path, path):
         response = post(client, path, {"threshold": "0.5", "file": image_file(image_path)})
 
     assert_problem(response, 503, "Object detector unavailable")
+
+
+def test_logs_the_cause_of_a_503(image_path, caplog):
+    detector = Mock()
+    detector.predict.side_effect = DetectorUnavailableError("connection refused")
+    app = app_with_detector(detector)
+
+    with app.test_client() as client, caplog.at_level(logging.ERROR):
+        post(client, "/object-count", {"threshold": "0.5", "file": image_file(image_path)})
+
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors == ["Object detector unavailable: connection refused"]
+
+
+def test_unexpected_error_is_logged_with_traceback(image_path, caplog):
+    detector = Mock()
+    detector.predict.side_effect = RuntimeError("secret internal detail")
+    app = app_with_detector(detector)
+
+    with app.test_client() as client, caplog.at_level(logging.ERROR):
+        post(client, "/object-count", {"threshold": "0.5", "file": image_file(image_path)})
+
+    (record,) = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert record.getMessage() == "Unhandled error"
+    assert record.exc_info[1].args == ("secret internal detail",)
+
+
+def test_logs_what_it_serves_at_startup(caplog):
+    detectors = DetectorRegistry(
+        [
+            ServedModel("cat_model", "3", FakeObjectDetector()),
+            ServedModel("dog_model", None, FakeObjectDetector()),
+        ],
+        default_model="cat_model",
+    )
+    with caplog.at_level(logging.INFO, logger="counter.entrypoints.webapp"):
+        create_app(detectors=detectors, count_repo=CountInMemoryRepo())
+
+    assert caplog.messages == [
+        "Serving models cat_model@3, dog_model@latest (default cat_model), env=dev, "
+        "count repo=CountInMemoryRepo, debug images=off"
+    ]
 
 
 def test_object_count_returns_503_when_count_store_is_down(monkeypatch, image_path):

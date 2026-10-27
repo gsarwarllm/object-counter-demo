@@ -35,3 +35,20 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "PIE", "PLW", "RUF"]
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["counter", "scripts"]
+# Every function in counter/ and scripts/ must be annotated; tests stay unannotated.
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+# No type information: flask-swagger-ui ships none; MLflow lives in its own venv.
+module = ["flask_swagger_ui", "mlflow", "mlflow.*"]
+ignore_missing_imports = true

@@ -46,6 +46,7 @@ services:
     build: .
     environment:
       ENV: prod
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       TFS_HOST: tfserving
       TFS_PORT: "8501"
       MODELS_LOCK: /app/tmp/model/models.lock.json

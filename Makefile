@@ -14,7 +14,7 @@ REGISTRY := scripts/model_registry.py
 export PYTHONPATH := .
 
 .DEFAULT_GOAL := help
-.PHONY: help setup run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test coverage test-integration test-models e2e-up test-e2e e2e docs lint format security check clean
+.PHONY: help setup lock typecheck run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test coverage test-integration test-models e2e-up test-e2e e2e docs lint format security check clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -22,7 +22,12 @@ help: ## Show this help
 setup: ## Create .venv (Python 3.12 via uv) and install runtime + dev dependencies
 	@test -x "$(UV)" || { echo "uv not found: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
 	$(UV) venv --python 3.12 $(VENV)
-	$(UV) pip install --python $(PY) -r requirements-dev.txt
+	$(UV) pip install --python $(PY) -r requirements-dev.lock
+
+# Pins every transitive package; keeps versions already locked unless requirements*.txt need others.
+lock: ## Regenerate requirements.lock and requirements-dev.lock after editing requirements*.txt
+	$(UV) pip compile requirements.txt --universal --python-version 3.12 -o requirements.lock -q
+	$(UV) pip compile requirements-dev.txt --universal --python-version 3.12 -o requirements-dev.lock -q
 
 run: ## Dev server on :5000 with the fake detector and in-memory counts
 	ENV=dev $(PY) -m counter.entrypoints.webapp
@@ -88,16 +93,19 @@ lint: ## ruff lint and format check
 	$(VENV)/bin/ruff check .
 	$(VENV)/bin/ruff format --check .
 
+typecheck: ## mypy on counter/ and scripts/ (settings in pyproject.toml)
+	$(VENV)/bin/mypy
+
 format: ## Apply ruff fixes and formatting
 	$(VENV)/bin/ruff check --fix .
 	$(VENV)/bin/ruff format .
 
 security: ## bandit and pip-audit
 	$(VENV)/bin/bandit -q -c pyproject.toml -r .
-	$(VENV)/bin/pip-audit -r requirements.txt
+	$(VENV)/bin/pip-audit -r requirements.lock
 	$(VENV)/bin/pip-audit -r requirements-models.txt
 
-check: lint docs security test ## lint + spec + security + tests (CI also runs integration, models, e2e)
+check: lint typecheck docs security test ## lint + types + spec + security + tests (CI also runs integration, models, e2e)
 
 clean: ## Remove caches and debug images
 	rm -rf .pytest_cache .ruff_cache tmp/debug

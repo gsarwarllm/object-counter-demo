@@ -2,7 +2,7 @@ import logging
 import os
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, Response, jsonify, request, send_file
 from flask_swagger_ui import get_swaggerui_blueprint
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
@@ -23,6 +23,9 @@ from counter.entrypoints.schemas import (
     to_models_response_dto,
     to_predictions_response_dto,
 )
+from counter.logging_config import configure_logging
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 # The API contract, written by hand (contract first) and served as-is.
@@ -32,8 +35,9 @@ OPENAPI_SPEC = Path(__file__).resolve().parents[2] / "docs" / "openapi.yaml"
 def create_app(
     detectors: DetectorRegistry | None = None,
     count_repo: ObjectCountRepo | None = None,
-):
+) -> Flask:
     """Builds the app; dependencies default to the ones configured by env vars (config.py)."""
+    configure_logging()
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = int(
         os.environ.get("MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES)
@@ -50,9 +54,18 @@ def create_app(
     detect_actions = {
         model.name: DetectObjects(model.detector, debug_image_writer) for model in detectors.models
     }
+    # What this process serves, so a log shows which model versions and store were in use.
+    logger.info(
+        "Serving models %s (default %s), env=%s, count repo=%s, debug images=%s",
+        ", ".join(f"{model.name}@{model.version or 'latest'}" for model in detectors.models),
+        detectors.default_model,
+        config.get_env(),
+        type(count_repo).__name__,
+        "on" if debug_image_writer else "off",
+    )
 
     @app.route("/object-count", methods=["POST"])
-    def object_count():
+    def object_count() -> Response:
         image_request = parse_image_request(request.form, request.files, detectors.names)
         model = detectors.get(image_request.model_name)
         count_response = count_actions[model.name].execute(
@@ -63,7 +76,7 @@ def create_app(
         )
 
     @app.route("/object-predictions", methods=["POST"])
-    def object_predictions():
+    def object_predictions() -> Response:
         image_request = parse_image_request(request.form, request.files, detectors.names)
         model = detectors.get(image_request.model_name)
         predictions = detect_actions[model.name].execute(
@@ -76,11 +89,11 @@ def create_app(
         )
 
     @app.route("/models", methods=["GET"])
-    def list_models():
+    def list_models() -> Response:
         return jsonify(to_models_response_dto(detectors))
 
     @app.route("/openapi.yaml", methods=["GET"])
-    def openapi_spec():
+    def openapi_spec() -> Response:
         return send_file(OPENAPI_SPEC, mimetype="application/yaml")
 
     # Swagger UI (assets bundled with flask-swagger-ui, so it works offline)
@@ -92,11 +105,11 @@ def create_app(
     return app
 
 
-def register_error_handlers(app: Flask):
+def register_error_handlers(app: Flask) -> None:
     """Every error leaves as RFC 7807 problem+json (status codes in plan.md section 5.3)."""
 
     @app.errorhandler(ValidationError)
-    def handle_validation_error(error):
+    def handle_validation_error(error: ValidationError) -> Response:
         return problem_response(
             400,
             "Invalid request",
@@ -105,39 +118,42 @@ def register_error_handlers(app: Flask):
         )
 
     @app.errorhandler(InvalidImageError)
-    def handle_invalid_image_error(error):
+    def handle_invalid_image_error(error: InvalidImageError) -> Response:
         return problem_response(400, "Invalid image", str(error))
 
     @app.errorhandler(RequestEntityTooLarge)
-    def handle_too_large(error):
+    def handle_too_large(error: RequestEntityTooLarge) -> Response:
         limit = app.config["MAX_CONTENT_LENGTH"]
         return problem_response(413, "Payload too large", f"Uploads are limited to {limit} bytes")
 
     @app.errorhandler(DetectorUnavailableError)
-    def handle_detector_unavailable(error):
+    def handle_detector_unavailable(error: DetectorUnavailableError) -> Response:
         app.logger.error("Object detector unavailable: %s", error)
         return problem_response(
             503, "Object detector unavailable", "The object detector is unavailable"
         )
 
     @app.errorhandler(RepositoryUnavailableError)
-    def handle_repository_unavailable(error):
+    def handle_repository_unavailable(error: RepositoryUnavailableError) -> Response:
         app.logger.error("Count repository unavailable: %s", error)
         return problem_response(
             503, "Count repository unavailable", "The count store is unavailable"
         )
 
     @app.errorhandler(HTTPException)
-    def handle_http_exception(error):
-        return problem_response(error.code, error.name, error.description)
+    def handle_http_exception(error: HTTPException) -> Response:
+        # Werkzeug types code/description as optional; its HTTP errors always set both.
+        return problem_response(error.code or 500, error.name, error.description or error.name)
 
     @app.errorhandler(Exception)
-    def handle_unexpected_error(error):
+    def handle_unexpected_error(error: Exception) -> Response:
         app.logger.exception("Unhandled error")
         return problem_response(500, "Internal server error", "An unexpected error occurred")
 
 
-def problem_response(status, title, detail, errors=None):
+def problem_response(
+    status: int, title: str, detail: str, errors: list[dict[str, str]] | None = None
+) -> Response:
     body = {
         "type": "about:blank",
         "title": title,
@@ -154,7 +170,6 @@ def problem_response(status, title, detail, errors=None):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     app = create_app()
     # Localhost and no debugger by default; containers set HOST=0.0.0.0.
     app.run(

@@ -1,15 +1,15 @@
 import json
-import logging
 import sys
 from dataclasses import asdict
 
 from counter import config
 from counter.domain.actions import CountDetectedObjects
+from counter.logging_config import configure_logging
 
 USAGE = "usage: python -m counter.entrypoints.main <image_path> <threshold> [model_name]"
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    configure_logging()
     if len(sys.argv) not in (3, 4):
         sys.exit(USAGE)
     img_path, threshold = sys.argv[1], float(sys.argv[2])

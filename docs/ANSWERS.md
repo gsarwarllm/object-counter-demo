@@ -18,12 +18,12 @@ I reviewed the original code (commit `1095f74`, before any of my changes) and li
 | Area | Findings | ✅ | 🟡 | 📋 |
 |---|---|---|---|---|
 | [API and validation](#31-api-and-validation) | 5 | 5 | 0 | 0 |
-| [Architecture and domain code](#32-architecture-and-domain-code) | 6 | 3 | 0 | 3 |
+| [Architecture and domain code](#32-architecture-and-domain-code) | 6 | 5 | 0 | 1 |
 | [Adapters](#33-adapters-tf-serving-and-mongodb) | 6 | 5 | 1 | 0 |
-| [Setup and documentation](#34-setup-and-documentation) | 7 | 5 | 0 | 2 |
+| [Setup and documentation](#34-setup-and-documentation) | 7 | 7 | 0 | 0 |
 | [Tests](#35-tests) | 5 | 5 | 0 | 0 |
 | [CI, security and dependencies](#36-ci-security-and-dependencies) | 4 | 4 | 0 | 0 |
-| **Total** | **33** | **27** | **1** | **5** |
+| **Total** | **33** | **31** | **1** | **1** |
 
 ### 3.1 API and validation
 
@@ -42,8 +42,8 @@ I reviewed the original code (commit `1095f74`, before any of my changes) and li
 | R6 | The domain layer imports Pillow and `counter.debug` and writes JPEGs (`actions._debug_image`) whenever Python runs without `-O`. | Breaks the hexagonal rule that the domain has no I/O; every request writes files into the working directory in dev, and fails if it's read-only. | Move debug drawing to an adapter injected into the actions (`debug_image_writer` or `None`), enabled by a `DEBUG_IMAGES` flag. | ✅ [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11): `DebugImageWriter` port ([`ports.py`](../counter/domain/ports.py)) and [`FileDebugImageWriter`](../counter/adapters/debug_image_writer.py), enabled by `DEBUG_IMAGES=1`; the domain no longer imports Pillow |
 | R7 | `config.py` picks factories by string with `globals()[f"{ENV}_..."]`. | An unknown `ENV` fails with a bare `KeyError`; the indirection hides which factories exist. | An explicit registry dict and a clear error message. | ✅ `COUNT_REPOS` registry ([PR #9](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/9)) and `OBJECT_DETECTORS` registry with a clear error for an unknown `ENV` ([PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11), [`config.py`](../counter/config.py)) |
 | R8 | `create_app()` reads `ENV` itself to build its dependencies. | `ENV=prod pytest` fails without live services; tests can't inject fakes. | Let `create_app(count_action=..., detect_action=...)` accept dependencies, defaulting to config. | ✅ [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11): `create_app(count_action=..., detect_action=...)`; tests inject failing detectors |
-| R9 | `count()` uses `functools.reduce` with a module-private helper. | Harder to read than needed. | `collections.Counter(p.class_name for p in predictions)`. | 📋 not planned (small cleanup) |
-| R10 | Type hints are missing on the public use-case methods (`execute(self, image, threshold)`), and nothing checks them. | Interface mistakes surface only at runtime. | Add hints (`BinaryIO`, `float`) and run `mypy` in CI. | 📋 not planned |
+| R9 | `count()` uses `functools.reduce` with a module-private helper. | Harder to read than needed. | `collections.Counter(p.class_name for p in predictions)`. | ✅ PR #17 ([`predictions.py`](../counter/domain/predictions.py)) |
+| R10 | Type hints are missing on the public use-case methods (`execute(self, image, threshold)`), and nothing checks them. | Interface mistakes surface only at runtime. | Add hints (`BinaryIO`, `float`) and run `mypy` in CI. | ✅ [PR #19](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/19): every function in `counter/` and `scripts/` annotated; `mypy` (strict on untyped defs, settings in [`pyproject.toml`](../pyproject.toml)) runs in the CI `lint` job and `make check` |
 | R11 | `/object-count` updates the totals and then reads them in two separate calls. | Under concurrent requests, the `total_objects` returned can include other requests' counts. The stored totals are still correct. | Document it, or return the totals from the same transaction (Postgres `RETURNING`). | 📋 not planned (acceptable for running totals) |
 
 ### 3.3 Adapters (TF Serving and MongoDB)
@@ -51,7 +51,7 @@ I reviewed the original code (commit `1095f74`, before any of my changes) and li
 | ID | Problem | Impact | Proposed fix | Status |
 |---|---|---|---|---|
 | R12 | `TFSObjectDetector` decodes images with `np.array(image.getdata()).reshape((h, w, 3))`. | RGBA PNGs and greyscale images crash with a reshape error (500); `getdata()` is also slow. | `Image.open(...).convert("RGB")` and `np.asarray(...)`; raise `InvalidImageError` for undecodable input. | ✅ [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11): any mode converted to RGB; tests for RGB, RGBA, greyscale and palette images ([`test_object_detector.py`](../tests/adapters/test_object_detector.py)) |
-| R13 | The TF Serving call had no timeout, no status check and used `print` for logging. | A hung model server blocks a worker forever; HTTP errors become confusing `KeyError`s; logs can't be filtered or shipped. | `timeout`, `raise_for_status()`, wrap failures in `DetectorUnavailableError` → 503, use `logging`. | ✅ Timeout in [PR #6](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/6); `raise_for_status`, `DetectorUnavailableError` → 503 and `logging` in [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11) ([`object_detector.py`](../counter/adapters/object_detector.py)) |
+| R13 | The TF Serving call had no timeout, no status check and used `print` for logging. | A hung model server blocks a worker forever; HTTP errors become confusing `KeyError`s; logs can't be filtered or shipped. | `timeout`, `raise_for_status()`, wrap failures in `DetectorUnavailableError` → 503, use `logging`. | ✅ Timeout in [PR #6](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/6); `raise_for_status`, `DetectorUnavailableError` → 503 and `logging` in [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11) ([`object_detector.py`](../counter/adapters/object_detector.py)); logging configured for every entrypoint incl. gunicorn, `LOG_LEVEL`, access log, per-call model and duration, startup summary in [PR #18](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/18) ([`logging_config.py`](../counter/logging_config.py)) |
 | R14 | `CountMongoDBRepo` creates a new `MongoClient` on every read and write. | A new connection pool per call: slow, and can exhaust connections under load. Mongo errors become 500s. | Create the client once; set `serverSelectionTimeoutMS`; wrap `PyMongoError` in `RepositoryUnavailableError` → 503. | ✅ [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11): one client per repo, `MONGO_TIMEOUT`, `PyMongoError` → 503 ([`count_repo.py`](../counter/adapters/count_repo.py)) |
 | R15 | Resource files are opened by CWD-relative paths (`counter/adapters/mscoco_label_map.json`, `counter/resources/arial.ttf`). | The app only works when started from the repo root. | Resolve paths from `Path(__file__).parent`. | ✅ [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11): label map and font resolved from `__file__`; tested from another working directory |
 | R16 | Repo adapters disagreed on edge cases: the in-memory repo returned `None` for unknown classes; the Mongo repo returned every class for an empty list. | Callers get different results depending on the configured store. | One contract test suite run against every adapter, and fix the differences. | ✅ [PR #9](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/9): [`tests/adapters/test_count_repo_contract.py`](../tests/adapters/test_count_repo_contract.py), fixes in [`count_repo.py`](../counter/adapters/count_repo.py) |
@@ -66,8 +66,8 @@ I reviewed the original code (commit `1095f74`, before any of my changes) and li
 | R20 | `tmp/model/model_config.config` serves a model called `rfcn` that the setup never downloads. | Using the config file with TF Serving fails to load any model. | Point it at `ssd_mobilenet_v2`, and have compose use it. | ✅ PR #8: [`model_config.config`](../tmp/model/model_config.config) |
 | R21 | Runtime and test/tool dependencies are mixed in one file. | The production image installs pytest. | `requirements.txt` (runtime) and `requirements-dev.txt` (tools). | ✅ [PR #6](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/6) and PR #8 |
 | R22 | Configuration via env vars is undocumented. | Users have to read the code to find `TFS_HOST`, `MONGO_DB`, ... | `.env.example` and a README table of every variable with its default. | ✅ PR #8 and PR #9: [`.env.example`](../.env.example), [`README.md`](../README.md#configuration) |
-| R23 | Only direct dependencies are pinned. | Transitive packages can change between installs, so builds aren't fully reproducible. | Generate a lock file (`uv pip compile` → `requirements.lock`). | 📋 not planned |
-| R24 | `.vscode/launch.json` hard-codes `ENV=prod`. | Debugging in VS Code fails unless TF Serving and Mongo are running. | Add a dev configuration and make it the first entry. | 📋 not planned |
+| R23 | Only direct dependencies are pinned. | Transitive packages can change between installs, so builds aren't fully reproducible. | Generate a lock file (`uv pip compile` → `requirements.lock`). | ✅ PR #17: `requirements.lock` + `requirements-dev.lock`, used by `make setup`, CI and the Docker image; `make lock` regenerates them and CI fails if they're stale |
+| R24 | `.vscode/launch.json` hard-codes `ENV=prod`. | Debugging in VS Code fails unless TF Serving and Mongo are running. | Add a dev configuration and make it the first entry. | ✅ PR #17 ([`launch.json`](../.vscode/launch.json): "Flask (dev)" first, "Flask (prod)" second) |
 
 ### 3.5 Tests
 
@@ -90,18 +90,14 @@ I reviewed the original code (commit `1095f74`, before any of my changes) and li
 
 ### Task 4: implemented improvements
 
-Task 4 asks to implement at least one proposal. **27 of the 33 are implemented**: R1–R8, R12–R16, R18–R22 and R25–R33, and **R17 partly** (per-model label maps, with Task 5). Most code fixes are in [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11) (plan item M4); setup in PR #8, the PostgreSQL adapter and contract tests in PR #9, CI and security in PRs #2 and #6.
+Task 4 asks to implement at least one proposal. **31 of the 33 are implemented**: R1–R10, R12–R16, R18–R33, and **R17 partly** (per-model label maps, with Task 5). Most code fixes are in [PR #11](https://github.com/gsarwarllm/object-counter-vibe-coding/pull/11) (plan item M4); setup in PR #8, the PostgreSQL adapter and contract tests in PR #9, CI and security in PRs #2 and #6, and R9, R23, R24 in PR #17, R10 in PR #19.
 
-The 5 not implemented, and the open part of R17, are proposals only, or are covered by later plan items:
+The one not implemented (R11), and the open part of R17, are proposals only, or are covered by later plan items:
 
 | ID | Why not (yet) |
 |---|---|
-| R9 | Small readability cleanup; no behaviour change |
-| R10 | Adding `mypy` to CI is worthwhile but out of the assignment's scope |
 | R11 | Acceptable for running totals; would need a different repo API |
 | R17 (gRPC part) | gRPC is a performance change that needs a live TF Serving to measure |
-| R23 | A lock file is a good next step for fully reproducible builds |
-| R24 | Editor configuration, not part of the application |
 
 ## Task 5: Multiple internally trained models
 

@@ -75,6 +75,6 @@ def read_lock(path: Path = DEFAULT_LOCK) -> dict[str, str]:
     return {name: str(version) for name, version in json.loads(Path(path).read_text()).items()}
 
 
-def write_lock(versions: dict[str, str], path: Path = DEFAULT_LOCK):
+def write_lock(versions: dict[str, str], path: Path = DEFAULT_LOCK) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(versions, indent=2, sort_keys=True) + "\n")

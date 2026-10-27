@@ -20,7 +20,7 @@ def get_detector_registry() -> DetectorRegistry:
     dev: fake detectors, no TF Serving needed. prod: TF Serving, pinned to the versions
     `make pull-models` wrote to models.lock.json (startup fails if one is missing).
     """
-    env = _env()
+    env = get_env()
     if env not in ENVS:
         raise ValueError(f"Unknown ENV {env!r}; expected one of {list(ENVS)}")
     manifest = load_manifest(Path(os.environ.get("MODELS_MANIFEST", DEFAULT_MANIFEST)))
@@ -69,7 +69,7 @@ COUNT_REPOS = {
 
 def get_count_repo() -> ObjectCountRepo:
     """COUNT_REPO picks the store; defaults keep the old behaviour (dev: memory, prod: mongo)."""
-    default = "mongo" if _env() == "prod" else "memory"
+    default = "mongo" if get_env() == "prod" else "memory"
     repo_name = os.environ.get("COUNT_REPO", default)
     if repo_name not in COUNT_REPOS:
         raise ValueError(f"Unknown COUNT_REPO {repo_name!r}; expected one of {sorted(COUNT_REPOS)}")
@@ -83,5 +83,5 @@ def get_debug_image_writer() -> DebugImageWriter | None:
     return None
 
 
-def _env() -> str:
+def get_env() -> str:
     return os.environ.get("ENV", "dev")

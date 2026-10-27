@@ -5,8 +5,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
 COPY counter ./counter
 COPY models ./models
@@ -16,5 +16,6 @@ RUN useradd --create-home appuser
 USER appuser
 
 EXPOSE 5000
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", \
+# --access-logfile -: one line per request on stdout (gunicorn logs none by default)
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--access-logfile", "-", \
      "counter.entrypoints.webapp:create_app()"]

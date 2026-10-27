@@ -1,4 +1,6 @@
 import io
+import logging
+import re
 from unittest.mock import Mock
 
 import numpy as np
@@ -125,3 +127,21 @@ def test_uses_the_injected_label_map(post):
     detector = TFSObjectDetector("tfs", 8501, "custom", {17: "price_tag", 47: "shelf"})
 
     assert [p.class_name for p in detector.predict(png_bytes("RGB"))] == ["price_tag", "shelf"]
+
+
+def test_logs_model_detections_and_duration(detector, post, caplog):
+    with caplog.at_level(logging.DEBUG, logger="counter.adapters.object_detector"):
+        detector.predict(png_bytes("RGB"))
+
+    info = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    debug = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
+    assert len(info) == 1
+    assert re.fullmatch(r"ssd_mobilenet_v2@3 returned 2 detections in \d+ ms", info[0])
+    assert debug == ["Sending request to TF Serving: " + post.call_args.args[0]]
+
+
+def test_failure_message_names_the_model(detector, post):
+    post.side_effect = requests.ConnectionError("refused")
+
+    with pytest.raises(DetectorUnavailableError, match="ssd_mobilenet_v2@3 failed: refused"):
+        detector.predict(png_bytes("RGB"))

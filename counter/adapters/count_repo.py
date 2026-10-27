@@ -1,5 +1,7 @@
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import psycopg
 from psycopg_pool import ConnectionPool, PoolTimeout
@@ -16,8 +18,8 @@ SCHEMA_LOCK_ID = 7_428_311
 
 
 class CountInMemoryRepo(ObjectCountRepo):
-    def __init__(self):
-        self.store = {}
+    def __init__(self) -> None:
+        self.store: dict[str, ObjectCount] = {}
 
     def read_values(self, object_classes: list[str] | None = None) -> list[ObjectCount]:
         if object_classes is None:
@@ -29,7 +31,7 @@ class CountInMemoryRepo(ObjectCountRepo):
             if object_class in self.store
         ]
 
-    def update_values(self, new_values: list[ObjectCount]):
+    def update_values(self, new_values: list[ObjectCount]) -> None:
         for new_object_count in new_values:
             key = new_object_count.object_class
             try:
@@ -42,9 +44,11 @@ class CountInMemoryRepo(ObjectCountRepo):
 
 
 class CountMongoDBRepo(ObjectCountRepo):
-    def __init__(self, host, port, database, timeout: float = 5.0):
+    def __init__(self, host: str, port: int, database: str, timeout: float = 5.0) -> None:
         # One client (and connection pool) for the repo's lifetime; it connects lazily.
-        self.__client = MongoClient(host, port, serverSelectionTimeoutMS=int(timeout * 1000))
+        self.__client: MongoClient[dict[str, Any]] = MongoClient(
+            host, port, serverSelectionTimeoutMS=int(timeout * 1000)
+        )
         self.__counter_col = self.__client[database].counter
 
     def read_values(self, object_classes: list[str] | None = None) -> list[ObjectCount]:
@@ -53,7 +57,7 @@ class CountMongoDBRepo(ObjectCountRepo):
             counters = list(self.__counter_col.find(query))
         return [ObjectCount(counter["object_class"], counter["count"]) for counter in counters]
 
-    def update_values(self, new_values: list[ObjectCount]):
+    def update_values(self, new_values: list[ObjectCount]) -> None:
         with _mongo_errors():
             for value in new_values:
                 self.__counter_col.update_one(
@@ -62,12 +66,12 @@ class CountMongoDBRepo(ObjectCountRepo):
                     upsert=True,
                 )
 
-    def close(self):
+    def close(self) -> None:
         self.__client.close()
 
 
 @contextmanager
-def _mongo_errors():
+def _mongo_errors() -> Iterator[None]:
     try:
         yield
     except PyMongoError as error:
@@ -88,7 +92,7 @@ class CountPostgresRepo(ObjectCountRepo):
         "WHERE object_class = ANY(%s) ORDER BY object_class"
     )
 
-    def __init__(self, conninfo: str, timeout: float = 5.0, max_size: int = 10):
+    def __init__(self, conninfo: str, timeout: float = 5.0, max_size: int = 10) -> None:
         # Opens in the background, so the app starts even while the database is down.
         self.__pool = ConnectionPool(
             conninfo,
@@ -101,6 +105,7 @@ class CountPostgresRepo(ObjectCountRepo):
         self.__schema_ready = False
 
     def read_values(self, object_classes: list[str] | None = None) -> list[ObjectCount]:
+        params: tuple[Any, ...]
         if object_classes is None:
             query, params = self.SELECT_ALL, ()
         else:
@@ -109,16 +114,16 @@ class CountPostgresRepo(ObjectCountRepo):
             rows = conn.execute(query, params).fetchall()
         return [ObjectCount(object_class, count) for object_class, count in rows]
 
-    def update_values(self, new_values: list[ObjectCount]):
+    def update_values(self, new_values: list[ObjectCount]) -> None:
         # One transaction; a fixed row order avoids deadlocks between concurrent requests.
         rows = sorted((value.object_class, value.count) for value in new_values)
         with self.__connection() as conn, conn.cursor() as cursor:
             cursor.executemany(self.UPSERT, rows)
 
-    def close(self):
+    def close(self) -> None:
         self.__pool.close()
 
-    def ensure_schema(self):
+    def ensure_schema(self) -> None:
         # Concurrent CREATE TABLE IF NOT EXISTS can still fail with a unique violation on
         # pg_type; the advisory lock (released at commit) serializes it across processes.
         with self.__pool.connection() as conn:
@@ -127,7 +132,7 @@ class CountPostgresRepo(ObjectCountRepo):
         self.__schema_ready = True
 
     @contextmanager
-    def __connection(self):
+    def __connection(self) -> Iterator[psycopg.Connection[Any]]:
         try:
             if not self.__schema_ready:
                 self.ensure_schema()

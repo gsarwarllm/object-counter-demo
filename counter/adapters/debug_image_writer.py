@@ -12,10 +12,10 @@ FONT_FILE = Path(__file__).resolve().parent.parent / "resources" / "arial.ttf"
 class FileDebugImageWriter(DebugImageWriter):
     """Draws the prediction boxes and saves a JPEG in output_dir."""
 
-    def __init__(self, output_dir: str | Path):
+    def __init__(self, output_dir: str | Path) -> None:
         self.__output_dir = Path(output_dir)
 
-    def write(self, image: BinaryIO, predictions: list[Prediction], image_name: str):
+    def write(self, image: BinaryIO, predictions: list[Prediction], image_name: str) -> None:
         image.seek(0)
         with Image.open(image) as opened_image:
             drawing = opened_image.convert("RGB")

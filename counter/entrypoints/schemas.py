@@ -1,7 +1,9 @@
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from io import BytesIO
 
 from PIL import Image
+from werkzeug.datastructures import FileStorage
 
 from counter.adapters.detector_registry import DetectorRegistry
 from counter.domain.errors import InvalidImageError, ValidationError
@@ -18,7 +20,9 @@ class ImageRequest:
     model_name: str | None
 
 
-def parse_image_request(form, files, model_names: list[str]) -> ImageRequest:
+def parse_image_request(
+    form: Mapping[str, str], files: Mapping[str, FileStorage], model_names: list[str]
+) -> ImageRequest:
     """Validates the multipart form shared by /object-count and /object-predictions.
 
     model_name is optional (None means the default model) and must be one of model_names.
@@ -59,7 +63,7 @@ def to_models_response_dto(detectors: DetectorRegistry) -> dict:
     }
 
 
-def _parse_threshold(form) -> float:
+def _parse_threshold(form: Mapping[str, str]) -> float:
     raw_threshold = form.get("threshold", DEFAULT_THRESHOLD)
     try:
         threshold = float(raw_threshold)
@@ -70,7 +74,7 @@ def _parse_threshold(form) -> float:
     return threshold
 
 
-def _parse_model_name(form, model_names: list[str]) -> str | None:
+def _parse_model_name(form: Mapping[str, str], model_names: list[str]) -> str | None:
     model_name = form.get("model_name") or None
     if model_name is not None and model_name not in model_names:
         raise ValidationError(
@@ -79,7 +83,7 @@ def _parse_model_name(form, model_names: list[str]) -> str | None:
     return model_name
 
 
-def _parse_image(files) -> BytesIO:
+def _parse_image(files: Mapping[str, FileStorage]) -> BytesIO:
     uploaded_file = files.get("file")
     if uploaded_file is None or uploaded_file.filename == "":
         raise ValidationError("file", "is required")

@@ -16,7 +16,7 @@ class ObjectCountRepo(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def update_values(self, new_values: list[ObjectCount]):
+    def update_values(self, new_values: list[ObjectCount]) -> None:
         raise NotImplementedError
 
 
@@ -24,5 +24,5 @@ class DebugImageWriter(ABC):
     """Saves an image with the prediction boxes drawn on it, for debugging."""
 
     @abstractmethod
-    def write(self, image: BinaryIO, predictions: list[Prediction], image_name: str):
+    def write(self, image: BinaryIO, predictions: list[Prediction], image_name: str) -> None:
         raise NotImplementedError

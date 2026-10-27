@@ -18,7 +18,9 @@ import shutil
 import tarfile
 import tempfile
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from counter.adapters.model_manifest import (
@@ -39,7 +41,7 @@ EXPERIMENT = "model-publishing"
 SAVED_MODEL_FILE = "saved_model.pb"
 
 
-def download(manifest: ModelManifest, downloads_dir: Path = DOWNLOADS_DIR):
+def download(manifest: ModelManifest, downloads_dir: Path = DOWNLOADS_DIR) -> None:
     """Fetches each model's SavedModel from its source_url; skips models already downloaded."""
     for spec in manifest.models:
         target = downloads_dir / spec.name
@@ -59,7 +61,7 @@ def download(manifest: ModelManifest, downloads_dir: Path = DOWNLOADS_DIR):
         print(f"{spec.name}: saved to {target}")
 
 
-def _extract_saved_model(archive: Path, target: Path):
+def _extract_saved_model(archive: Path, target: Path) -> None:
     """Extracts the <archive root>/saved_model/ folder into target."""
     with tarfile.open(archive) as tar, tempfile.TemporaryDirectory() as tmp:
         tar.extractall(tmp, filter="data")
@@ -70,7 +72,7 @@ def _extract_saved_model(archive: Path, target: Path):
         shutil.copytree(found[0].parent, target, dirs_exist_ok=True)
 
 
-def publish(manifest: ModelManifest, downloads_dir: Path = DOWNLOADS_DIR):
+def publish(manifest: ModelManifest, downloads_dir: Path = DOWNLOADS_DIR) -> None:
     """Registers each downloaded model as a new MLflow version, unless identical to one already
     registered. A model's first version also gets the manifest's registry_alias."""
     mlflow, client = _mlflow()
@@ -99,7 +101,7 @@ def publish(manifest: ModelManifest, downloads_dir: Path = DOWNLOADS_DIR):
             print(f"{spec.name}: alias {spec.registry_alias!r} -> version {version.version}")
 
 
-def promote(name: str, version: str, alias: str):
+def promote(name: str, version: str, alias: str) -> None:
     """Points an alias at a version: how a new model version is released or rolled back."""
     _, client = _mlflow()
     client.get_model_version(name, version)  # fails clearly if the version doesn't exist
@@ -111,11 +113,11 @@ def pull(
     manifest: ModelManifest,
     model_dir: Path = MODEL_DIR,
     lock_path: Path = DEFAULT_LOCK,
-):
+) -> None:
     """Resolves each model's alias to a version, downloads it into the TF Serving layout
     (model_dir/<name>/<version>/), and writes model_config.config and models.lock.json."""
     mlflow, client = _mlflow()
-    versions = {}
+    versions: dict[str, str] = {}
     for spec in manifest.models:
         version = client.get_model_version_by_alias(spec.name, spec.registry_alias)
         number = str(version.version)  # MLflow 3 returns an int
@@ -154,7 +156,8 @@ def tf_serving_config(versions: dict[str, str]) -> str:
     )
 
 
-def _mlflow():
+def _mlflow() -> tuple[Any, Any]:
+    # MLflow is optional (own venv) and untyped here, so its objects are Any.
     os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
     import mlflow
     from mlflow import MlflowClient
@@ -166,15 +169,15 @@ def _mlflow():
     return mlflow, MlflowClient()
 
 
-def _experiment_id(mlflow, client) -> str:
+def _experiment_id(mlflow: Any, client: Any) -> str:
     experiment = client.get_experiment_by_name(EXPERIMENT)
     if experiment is not None:
-        return experiment.experiment_id
+        return str(experiment.experiment_id)
     artifacts = os.environ.get("MLFLOW_ARTIFACTS_DIR", str(MLFLOW_DIR / "artifacts"))
-    return mlflow.create_experiment(EXPERIMENT, artifact_location=Path(artifacts).as_uri())
+    return str(mlflow.create_experiment(EXPERIMENT, artifact_location=Path(artifacts).as_uri()))
 
 
-def _ensure_registered_model(client, spec: ModelSpec):
+def _ensure_registered_model(client: Any, spec: ModelSpec) -> None:
     from mlflow.exceptions import MlflowException
 
     try:
@@ -191,7 +194,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -208,7 +211,12 @@ def main():
         promote(args.name, args.version, args.alias)
         return
     manifest = load_manifest(args.manifest)
-    {"download": download, "publish": publish, "pull": pull}[args.command](manifest)
+    commands_by_name: dict[str, Callable[[ModelManifest], None]] = {
+        "download": download,
+        "publish": publish,
+        "pull": pull,
+    }
+    commands_by_name[args.command](manifest)
 
 
 if __name__ == "__main__":
