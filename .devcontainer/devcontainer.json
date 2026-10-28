@@ -1,0 +1,32 @@
+{
+  // GitHub Codespaces / VS Code dev container: everything for the real models, nothing to install
+  // locally. Docker-in-Docker (not docker-outside-of-docker) so the compose bind mounts of ./tmp
+  // resolve inside this container.
+  "name": "Object Counter",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  // The whole stack (TF Serving with two models, MongoDB, PostgreSQL, app, Prometheus, Grafana)
+  // needs about 2.5 GB; the smallest Codespaces machine (2 cores, 8 GB) is enough.
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+  // Runs once when the codespace is created: make, then uv, both venvs, both models, make doctor.
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y make && make install",
+  "forwardPorts": [5000, 3000, 9090, 5001, 8501],
+  "portsAttributes": {
+    "5000": {"label": "Object Counter API (/docs)", "onAutoForward": "notify"},
+    "3000": {"label": "Grafana", "onAutoForward": "notify"},
+    "9090": {"label": "Prometheus", "onAutoForward": "silent"},
+    "5001": {"label": "MLflow UI", "onAutoForward": "silent"},
+    "8501": {"label": "TF Serving", "onAutoForward": "silent"}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python"]
+    }
+  }
+}

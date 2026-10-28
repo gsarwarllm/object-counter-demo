@@ -1,0 +1,7 @@
+# LF line endings on every checkout, Windows included: these files run in Linux containers
+# and WSL (compose commands, shell scripts, configs mounted into containers).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pdf binary
+*.ttf binary

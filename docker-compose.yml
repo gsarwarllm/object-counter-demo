@@ -135,6 +135,37 @@ services:
       prometheus:
         condition: service_healthy
 
+  # Docker-only setup, for machines without make or Python (e.g. Windows PowerShell):
+  #   docker compose --profile setup run --rm setup
+  # Downloads both models, registers them in the local MLflow registry and pulls them into ./tmp
+  # for TF Serving: what `make setup-models models` does. The MLflow venv lives in a volume, so a
+  # second run only checks it. HOST_UID/HOST_GID (Linux) give ./tmp back to your user.
+  setup:
+    profiles: ["setup"]
+    image: python:3.12-slim
+    working_dir: /work
+    volumes:
+      - .:/work
+      - setup-venv:/opt/venv
+    environment:
+      PYTHONPATH: /work
+      MLFLOW_DISABLE_AGENT_HINT: "1"
+      GIT_PYTHON_REFRESH: quiet  # MLflow looks for git, which the image lacks
+      PYTHONDONTWRITEBYTECODE: "1"  # no root-owned __pycache__ in your clone
+    command:
+      - sh
+      - -ec
+      - |
+        pip install -q --root-user-action=ignore uv==0.13.5
+        uv venv --allow-existing --python 3.12 /opt/venv
+        uv pip install -q --python /opt/venv/bin/python -r requirements-models.txt -r requirements-dev.txt
+        /opt/venv/bin/python scripts/model_registry.py download
+        /opt/venv/bin/python scripts/model_registry.py publish
+        /opt/venv/bin/python scripts/model_registry.py pull
+        chown -R ${HOST_UID:-1000}:${HOST_GID:-1000} tmp 2>/dev/null || true
+        echo "Setup done. Start the app: docker compose --profile app up -d --wait"
+
 volumes:
   mongo-data:
   postgres-data:
+  setup-venv:

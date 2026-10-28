@@ -37,7 +37,7 @@ current code (`counter/`, `tests/`, `README.md`, `requirements.txt`, `.vscode/la
 ```bash
 # One-time setup
 curl -LsSf https://astral.sh/uv/install.sh | sh
-cd /home/gssarwar/project/object-counter-vibe-coding
+cd /home/gssarwar/project/object-counter-demo
 ~/.local/bin/uv venv --python 3.12 .venv
 ~/.local/bin/uv pip install --python .venv/bin/python -r requirements.txt
 
@@ -766,9 +766,9 @@ and `security:` per operation; Swagger UI shows an "Authorize" button.
 
 | ID | Item | Acceptance criteria |
 |---|---|---|
-| O2 ✅ | `GET /health`, `GET /health/ready`, `GET /object-counts` (section 5.6) | used by compose healthchecks; documented in OpenAPI. Done in PR #20; readiness reports one check per served model (`checks.detectors.<model>`), since M5 serves several |
+| O2 ✅ | `GET /health`, `GET /health/ready`, `GET /object-counts` (section 5.6) | used by compose healthchecks; documented in OpenAPI. Done in [commit d5c75c4](https://github.com/gsarwarllm/object-counter-demo/commit/d5c75c46fa58e044df7e82a1fb0e86212e03ed1a); readiness reports one check per served model (`checks.detectors.<model>`), since M5 serves several |
 | O3 | GitHub Actions: `make lint test` on every push, `make test-integration` with service containers | green badge in the README |
-| O4 ✅ | JSON logs with request ID; Prometheus `/metrics` (request count, latency, detector latency) | request ID returned in an `X-Request-ID` header. Implemented as X1 (section 11, PR #21) |
+| O4 ✅ | JSON logs with request ID; Prometheus `/metrics` (request count, latency, detector latency) | request ID returned in an `X-Request-ID` header. Implemented as X1 (section 11, [commit 3f19c22](https://github.com/gsarwarllm/object-counter-demo/commit/3f19c226e5028807da8f378bc77e4929210b4e0f)) |
 | O5 | Rate limiting (`flask-limiter` / `slowapi` / Bucket4j) | 429 problem+json when exceeded |
 
 ---
@@ -882,7 +882,7 @@ can be rolled back. These items cover what happens after deployment: knowing whe
 service and the model still work, and releasing new versions safely. They're ordered by value
 for effort; X1–X3 are meant to be built, X4–X7 can stay an outline if time runs out.
 
-**Current state (after PR #20).** Lifecycle: MLflow registry, aliases, pinned versions,
+**Current state (after [commit d5c75c4](https://github.com/gsarwarllm/object-counter-demo/commit/d5c75c46fa58e044df7e82a1fb0e86212e03ed1a)).** Lifecycle: MLflow registry, aliases, pinned versions,
 promote/rollback. Serving: TF Serving, versioned URLs, readiness probe. Logs: per-call
 `model@version`, detections and duration; startup summary; access log. Missing: metrics,
 dashboards and alerts, any record of model inputs and outputs (so no drift detection), a
@@ -890,13 +890,13 @@ quality gate on promotion, and a feedback loop with labels.
 
 | ID | Item | Priority | Size | Depends on |
 |---|---|---|---|---|
-| X1 ✅ | Observability: Prometheus `/metrics`, request IDs, JSON logs, Prometheus + Grafana in Compose (also covers O4). Done in PR #21 | P1 | M | O2 |
-| X2 ✅ | Prediction logging port + prediction-drift monitoring (scores, classes, detections per image). Done in PR #22 | P1 | M | X1 |
-| X3 ✅ | Reference baseline per model version, stored in MLflow. Done in PR #22 (computed by `baseline` once the version is served, not at `publish`: it needs TF Serving running that version) | P1 | S | X2 |
-| X4 ✅ | Input-data drift: image size, aspect ratio, brightness, contrast, colour mode. Done in PR #23 | P2 | S | X2 |
-| X5 ✅ | Quality gate on `promote-model`: evaluate on a fixed labelled set, refuse a worse model. Done in PR #23 (image-level precision/recall/F1, not mAP) | P2 | M | none |
-| X6 ✅ | Shadow and canary releases for the candidate version. Done in PR #24 (the X5 `candidate` alias, not a separate `challenger`) | P2 | M–L | X1, X2 |
-| X8 ✅ | Database tuning: Postgres fillfactor for HOT updates, prediction-log retention with a BRIN index, Mongo unique index and bulk upserts. Done in PR #25 | P2 | S | M2, X2 |
+| X1 ✅ | Observability: Prometheus `/metrics`, request IDs, JSON logs, Prometheus + Grafana in Compose (also covers O4). Done in [commit 3f19c22](https://github.com/gsarwarllm/object-counter-demo/commit/3f19c226e5028807da8f378bc77e4929210b4e0f) | P1 | M | O2 |
+| X2 ✅ | Prediction logging port + prediction-drift monitoring (scores, classes, detections per image). Done in [commit 3f19c22](https://github.com/gsarwarllm/object-counter-demo/commit/3f19c226e5028807da8f378bc77e4929210b4e0f) | P1 | M | X1 |
+| X3 ✅ | Reference baseline per model version, stored in MLflow. Done in [commit 3f19c22](https://github.com/gsarwarllm/object-counter-demo/commit/3f19c226e5028807da8f378bc77e4929210b4e0f) (computed by `baseline` once the version is served, not at `publish`: it needs TF Serving running that version) | P1 | S | X2 |
+| X4 ✅ | Input-data drift: image size, aspect ratio, brightness, contrast, colour mode. Done in [commit 3f19c22](https://github.com/gsarwarllm/object-counter-demo/commit/3f19c226e5028807da8f378bc77e4929210b4e0f) | P2 | S | X2 |
+| X5 ✅ | Quality gate on `promote-model`: evaluate on a fixed labelled set, refuse a worse model. Done in [commit 3f19c22](https://github.com/gsarwarllm/object-counter-demo/commit/3f19c226e5028807da8f378bc77e4929210b4e0f) (image-level precision/recall/F1, not mAP) | P2 | M | none |
+| X6 ✅ | Shadow and canary releases for the candidate version. Done in [commit 3f19c22](https://github.com/gsarwarllm/object-counter-demo/commit/3f19c226e5028807da8f378bc77e4929210b4e0f) (the X5 `candidate` alias, not a separate `challenger`) | P2 | M–L | X1, X2 |
+| X8 ✅ | Database tuning: Postgres fillfactor for HOT updates, prediction-log retention with a BRIN index, Mongo unique index and bulk upserts. Done in [commit 71bfe30](https://github.com/gsarwarllm/object-counter-demo/commit/71bfe30cb103118b13813f6b8a06977bbea01fe8) | P2 | S | M2, X2 |
 | X9 ✅ | Demo data: synthetic baselines and predictions that show drift, moderate drift and stable on the dashboard (`make demo-data`). Done on `feat/demo-data` | P3 | S | X2, X4 |
 | X7 📝 | Feedback loop: labelled sampling, accuracy monitoring, retraining trigger, dataset versioning. **Outline only** (decision 2026-10-28) | P3 | L | X2, X5 |
 
@@ -933,7 +933,7 @@ and TF Serving and that Grafana loaded the dashboard.
   frequencies. Results are exported as Prometheus gauges (`model_drift_score{model, version,
   feature}`) and alerted on; an HTML report per model version shows the details.
 
-**As built (PR #22):** the `PredictionLog` port is fed by the `InstrumentedDetector` decorator
+**As built ([commit 3f19c22](https://github.com/gsarwarllm/object-counter-demo/commit/3f19c226e5028807da8f378bc77e4929210b4e0f)):** the `PredictionLog` port is fed by the `InstrumentedDetector` decorator
 (raw model output, independent of the caller's threshold), with in-memory and PostgreSQL
 adapters and a background writer that drops and counts records instead of slowing requests.
 PSI is computed in `counter/monitoring/drift.py` (standard library only; Evidently would add a
@@ -955,7 +955,7 @@ Cheap image statistics computed at upload (size, aspect ratio, mean brightness, 
 RGBA/greyscale share) catch camera, compression or client changes before they show up as
 prediction drift. Embedding-based drift (a small backbone network) is a later step.
 
-**As built (PR #23):** `counter/adapters/image_stats.py` (Pillow, reduced JPEG decode) fills
+**As built ([commit 3f19c22](https://github.com/gsarwarllm/object-counter-demo/commit/3f19c226e5028807da8f378bc77e4929210b4e0f)):** `counter/adapters/image_stats.py` (Pillow, reduced JPEG decode) fills
 `PredictionRecord.image`; PostgreSQL gets nullable columns through `003_*.sql`; the five input
 features use the same PSI and gauges, with their own Grafana panel and an `InputDrift` alert.
 
@@ -965,7 +965,7 @@ features use the same PSI and gauges, with their own Grafana panel and an `Input
 `pycocotools`), stores the metrics in MLflow, writes a short model card, and refuses to promote
 a version that is worse than the current `champion` beyond a tolerance.
 
-**As built (PR #23):** `evaluate NAME VERSION` scores a version served by TF Serving on a labelled
+**As built ([commit 3f19c22](https://github.com/gsarwarllm/object-counter-demo/commit/3f19c226e5028807da8f378bc77e4929210b4e0f)):** `evaluate NAME VERSION` scores a version served by TF Serving on a labelled
 set with **image-level** labels (which classes are visible), so precision, recall and F1 per
 class and micro-averaged; box-level mAP needs box annotations and stays a next step. Results are
 version tags (`eval_f1`, `eval_fingerprint`, ...) plus a model card and the full evaluation as
@@ -983,7 +983,7 @@ requests goes to the challenger; it's promoted automatically if its error rate, 
 stay within limits for a period. `DetectorRegistry` already holds several models, so this
 is a routing change in the web layer.
 
-**As built (PR #24):** the candidate is X5's `candidate` alias; `pull` also writes
+**As built ([commit 3f19c22](https://github.com/gsarwarllm/object-counter-demo/commit/3f19c226e5028807da8f378bc77e4929210b4e0f)):** the candidate is X5's `candidate` alias; `pull` also writes
 `candidates.lock.json`, and `ServedModel` gets an optional `Candidate`. `RELEASE_MODE=off|shadow|
 canary` (default off). Shadow: `ShadowDetector` (a decorator like `InstrumentedDetector`) answers
 with the champion and hands a copy of the image to a bounded background pool (drops are counted);

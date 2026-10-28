@@ -14,14 +14,36 @@ REGISTRY := scripts/model_registry.py
 export PYTHONPATH := .
 
 .DEFAULT_GOAL := help
-.PHONY: help setup lock typecheck monitoring baseline drift evaluate canary-check canary-promote run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test coverage test-integration test-models e2e-up test-e2e e2e docs lint format security check clean
+.PHONY: help install install-docker start urls doctor setup lock typecheck monitoring baseline drift evaluate canary-check canary-promote run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test coverage test-integration test-models e2e-up test-e2e e2e docs lint format security check clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
+install: ## Once after cloning: uv (if missing), both venvs, both models, then make doctor; safe to re-run
+	@command -v uv >/dev/null 2>&1 || test -x "$(HOME)/.local/bin/uv" || { echo "Installing uv"; curl -LsSf https://astral.sh/uv/install.sh | sh; }
+	@$(MAKE) --no-print-directory setup setup-models models
+	@$(MAKE) --no-print-directory doctor
+
+# apt and the docker group need sudo, and the group only applies after logging in again.
+install-docker: ## Linux (Ubuntu) only: install Docker and Compose v2 and join the docker group; then log out and in
+	@if grep -qi microsoft /proc/version 2>/dev/null; then echo "WSL: install Docker Desktop on Windows instead (docs/SETUP.md, Part A)"; exit 1; fi
+	@command -v apt-get >/dev/null 2>&1 || { echo "Needs apt-get (Ubuntu/Debian); install Docker and Compose v2 by hand"; exit 1; }
+	sudo apt-get update
+	sudo apt-get install -y docker.io docker-compose-v2
+	sudo usermod -aG docker $(USER)
+	@echo "Done. Log out and in again (or: sudo reboot), then check with: docker run --rm hello-world"
+
+start: up run-prod ## The real models: make up, then make run-prod (Ctrl+C stops the app, make down the services)
+
+urls: ## Print every URL to try, for this machine or this codespace (docs/DEMO-URLS.md)
+	@bash scripts/urls.sh
+
+doctor: ## Check Docker, Compose, RAM, disk, free ports and pulled models before make up/monitoring
+	@bash scripts/doctor.sh
+
 setup: ## Create .venv (Python 3.12 via uv) and install runtime + dev dependencies
 	@test -x "$(UV)" || { echo "uv not found: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
-	$(UV) venv --python 3.12 $(VENV)
+	$(UV) venv --allow-existing --python 3.12 $(VENV)
 	$(UV) pip install --python $(PY) -r requirements-dev.lock
 
 # Pins every transitive package; keeps versions already locked unless requirements*.txt need others.
@@ -37,7 +59,7 @@ run-prod: ## Server on :5000 against the compose services (run `make up` first)
 
 setup-models: ## Create .venv-models with MLflow for the model registry
 	@test -x "$(UV)" || { echo "uv not found: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
-	$(UV) venv --python 3.12 $(MODELS_VENV)
+	$(UV) venv --allow-existing --python 3.12 $(MODELS_VENV)
 	$(UV) pip install --python $(MPY) -r requirements-models.txt -r requirements-dev.txt
 
 models: download-models publish-models pull-models ## Download, publish to MLflow, and pull for TF Serving
@@ -60,8 +82,9 @@ baseline: ## Drift baselines: run resources/images through each served version (
 evaluate: ## Quality gate input: make evaluate MODEL=name VERSION=2 [DATASET=file] (version served by TF Serving)
 	$(MPY) $(REGISTRY) evaluate $(MODEL) $(VERSION) $(if $(DATASET),--dataset $(DATASET))
 
-drift: ## Drift report per served model version (JSON; PREDICTION_LOG and BASELINES_DIR as for the app)
-	$(PY) -m counter.entrypoints.drift
+# ENV=prod: the dev default reads an empty in-memory log and finds no baselines.
+drift: ## Drift report per served model version (JSON; reads prediction_logs in Postgres, like run-prod)
+	ENV=prod $(PY) -m counter.entrypoints.drift
 
 demo-data: ## Synthetic drift demo for a LOCAL stack: baselines + predictions per served version [RESET=1] [REQUESTS=n] [URL=...]
 	$(PY) scripts/demo_data.py --demo $(if $(RESET),--reset) $(if $(REQUESTS),--requests $(REQUESTS)) $(if $(URL),--url $(URL))

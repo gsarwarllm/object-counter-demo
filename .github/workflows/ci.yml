@@ -180,7 +180,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose --profile app --profile monitoring config --quiet
+      - run: docker compose --profile setup --profile app --profile monitoring config --quiet
       - run: docker build -t object-counter .
       - name: Smoke-test the image (fake detector)
         run: |
