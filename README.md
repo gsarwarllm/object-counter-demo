@@ -65,11 +65,11 @@ Needs: `git`, `make`, `curl` and Docker with Compose v2 (`make install-docker` o
 | Every check CI runs without Docker (lint, types, spec, security, tests) | `make check` |
 | Check the machine (Docker, RAM, disk, ports, models) | `make doctor` |
 | Every page to open, with this machine's or codespace's addresses | `make urls` |
-| Browse the model registry | `make mlflow-ui` → [http://127.0.0.1:5001](http://127.0.0.1:5001) |
+| Browse the model registry | `make mlflow-ui` → [http://127.0.0.1:5001](http://127.0.0.1:5001) (`make demo` starts it in the background) |
 | Release or roll back a model version | `make promote-model MODEL=... VERSION=... [ALIAS=candidate] [FORCE=1]`, then `make pull-models` ([how](docs/MODELS.md)) |
 | Drift baselines, quality-gate evaluation, drift report | `make baseline`, `make evaluate MODEL=... VERSION=...`, `make drift` |
 | Canary verdict and promotion | `make canary-check MODEL=...`, `make canary-promote MODEL=...` |
-| Demo data for the dashboards (local stack only) | `make demo-data RESET=1` |
+| Demo data for the dashboards (local stack only) | `make demo-data RESET=1`, or the whole demo in one command: `make demo` |
 | Container logs | `make logs` |
 
 Dev mode never runs a model: [what each mode really runs](docs/ARCHITECTURE.md#dev-or-prod-what-each-mode-really-runs). `make help` lists every target.

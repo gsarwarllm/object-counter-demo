@@ -32,7 +32,7 @@ models/models.json ──> make download-models ──> tmp/downloads/<name>/   
 - **Rolling back:** `make promote-model MODEL=acme_shelf_detector VERSION=1 FORCE=1` skips the gate (recorded on the version as `promoted_without_gate`), then `make pull-models` and restart.
 - **Evaluation set:** [`models/evaluation/coco_sample.json`](../models/evaluation/coco_sample.json) labels which COCO classes are visible in each sample image (image-level, no boxes). Three images only demonstrate the gate; use `DATASET=` with a set of hundreds of images like the production traffic. Its fingerprint (labels + images) is stored with each evaluation, so versions are only compared on the same set.
 - **Drift baseline for a version:** after `make up`, `make baseline` (optionally `IMAGES=/path/to/validation/images`); `make pull-models` fetches stored baselines with their versions. See [Model monitoring](OPERATIONS.md#model-monitoring-drift).
-- **Browsing the registry:** `make mlflow-ui`, then open http://127.0.0.1:5001.
+- **Browsing the registry:** `make mlflow-ui` (or `make demo`, which starts it in the background), then open http://127.0.0.1:5001.
 - **Private registry:** set `MLFLOW_TRACKING_URI` to your MLflow server (with its credentials); the same commands work.
 
 In dev (`ENV=dev`), every model in the manifest is served by the fake detector, so model selection works without Docker (see [Dev or prod](ARCHITECTURE.md#dev-or-prod-what-each-mode-really-runs)).

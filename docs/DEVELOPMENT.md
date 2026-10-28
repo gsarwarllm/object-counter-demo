@@ -6,6 +6,7 @@ Make targets, tests, dependencies and how changes get into `main`.
 |---|---|
 | `make install` / `make start` | Install everything for the real models / start the services and the app (see [Run it](../README.md#quick-start)) |
 | `make doctor` | Check Docker, Compose, RAM, disk, free ports and pulled models |
+| `make demo` / `make down` | The full demo: `make monitoring`, demo data, the MLflow UI in the background, then every URL (`RESET=1`, `REQUESTS=n`) / stop all of it |
 | `make test` | Unit, API, contract and stub-TF-Serving integration tests: no Docker needed, ~20 s |
 | `make coverage` | The same with a coverage report (fails under 90%) |
 | `make test-integration` | Repo tests against real PostgreSQL and MongoDB, started with testcontainers (needs Docker, or set `TEST_POSTGRES_DSN` / `TEST_MONGO_HOST`) |

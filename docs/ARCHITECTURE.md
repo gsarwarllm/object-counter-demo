@@ -32,7 +32,7 @@ The domain owns the ports (interfaces); adapters on both sides implement or call
 
 `ENV` picks the adapters in [`counter/config.py`](../counter/config.py) (the composition root); the domain code is the same in every mode. Dev mode only shows that the HTTP layer and the use cases work: it never runs a model and keeps nothing.
 
-| | Dev: `make run` | Prod on the host: `make start` | All in Docker: `make monitoring` |
+| | Dev: `make run` | Prod on the host: `make start` | All in Docker: `make monitoring` or `make demo` |
 |---|---|---|---|
 | `ENV` | `dev` | `prod` | `prod` |
 | Object detector | `FakeObjectDetector`: returns exactly one `cat` (score 0.999, the same box) **for any image**, so counts, classes and scores say nothing about the picture | TF Serving with the real models | the same |
