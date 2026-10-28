@@ -24,12 +24,12 @@ The paths are the same in both places: replace `localhost:P` with the codespace 
 | Totals | [localhost:5000/object-counts](http://localhost:5000/object-counts) | Objects counted so far, per class (`?object_class=cat` filters) | `make start` |
 | API contract | [localhost:5000/openapi.yaml](http://localhost:5000/openapi.yaml) | The OpenAPI 3 specification the tests check the API against | `make start` |
 | App metrics | [localhost:5000/metrics](http://localhost:5000/metrics) | Prometheus metrics: requests, latency, detector calls, objects counted, drift | `make start` |
-| **Grafana dashboard** | [localhost:3000/d/object-counter](http://localhost:3000/d/object-counter) | 11 panels: traffic, latency, errors, detector calls per model version, objects per class, prediction and input drift, releases (no login to view; `admin`/`admin` to edit) | `make monitoring` |
-| Prometheus targets | [localhost:9090/targets](http://localhost:9090/targets) | The app and TF Serving, both *UP* | `make monitoring` |
-| Prometheus alerts | [localhost:9090/alerts](http://localhost:9090/alerts) | The 5 alert rules: `ModelDrift`, `InputDrift`, `HighServerErrorRate`, `DetectorUnavailable`, `CandidateUnhealthy` | `make monitoring` |
+| **Grafana dashboard** | [localhost:3000/d/object-counter](http://localhost:3000/d/object-counter) | 11 panels: traffic, latency, errors, detector calls per model version, objects per class, prediction and input drift, releases (no login to view; `admin`/`admin` to edit) | `make monitoring` or `make demo` |
+| Prometheus targets | [localhost:9090/targets](http://localhost:9090/targets) | The app and TF Serving, both *UP* | `make monitoring` or `make demo` |
+| Prometheus alerts | [localhost:9090/alerts](http://localhost:9090/alerts) | The 5 alert rules: `ModelDrift`, `InputDrift`, `HighServerErrorRate`, `DetectorUnavailable`, `CandidateUnhealthy` | `make monitoring` or `make demo` |
 | TF Serving, default model | [localhost:8501/v1/models/ssd_mobilenet_v2](http://localhost:8501/v1/models/ssd_mobilenet_v2) | The model version TF Serving loaded and its state (`AVAILABLE`) | `make start` |
 | TF Serving, second model | [localhost:8501/v1/models/acme_shelf_detector](http://localhost:8501/v1/models/acme_shelf_detector) | The same for the second model | `make start` |
-| MLflow registry | [127.0.0.1:5001](http://127.0.0.1:5001) | Registered models, versions, aliases (`champion`), evaluation scores and baselines | `make mlflow-ui` in its own terminal (about 20 seconds to start) |
+| MLflow registry | [127.0.0.1:5001](http://127.0.0.1:5001) | Registered models, versions, aliases (`champion`), evaluation scores and baselines | `make mlflow-ui` in its own terminal, or `make demo` (about 20 seconds to start) |
 
 The app's root address (`localhost:5000/` alone) answers `404`: the API has no home page. Open `/docs/` instead.
 

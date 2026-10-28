@@ -16,7 +16,9 @@ A codespace is a Linux machine in the cloud with VS Code in your browser. The re
    make start
    ```
 
-4. Run `make urls` in a second terminal: it prints this codespace's address of every page ([Demo URLs](DEMO-URLS.md)). Or open the **Ports** tab (next to *Terminal*) → port **5000** → the globe icon, and add `/docs/` to the address (the API has no home page, so the address alone answers `404`). Grafana (3000), Prometheus (9090), TF Serving (8501) and the MLflow UI (5001) open the same way. To share a page, right-click its port → *Port Visibility* → **Public**.
+   Or, for the full demo instead: `make demo` starts everything in Docker with Grafana and Prometheus, fills the dashboards with demo data, starts the MLflow UI in the background and prints every page's address (about 5.5 GB of the codespace's 8 GB; the prompt comes back when it's done).
+
+4. Run `make urls` in a second terminal: it prints this codespace's address of every page ([Demo URLs](DEMO-URLS.md)). Or open the **Ports** tab (next to *Terminal*) → port **5000** → the globe icon, and add `/docs/` to the address (the API has no home page, so the address alone answers `404`). TF Serving (8501) opens the same way; Grafana (3000), Prometheus (9090) and the MLflow UI (5001) too, after `make demo`. To share a page, right-click its port → *Port Visibility* → **Public**.
 5. A second terminal: click **+** in the terminal panel. Every command in [`TESTING-GUIDE.md`](TESTING-GUIDE.md) works there as written; open its `localhost` links through the **Ports** tab instead.
 6. When you're done: **Code** → **Codespaces** → **...** next to the codespace → **Stop codespace** (or **Delete**, which also frees its storage).
 
@@ -308,11 +310,13 @@ curl -F "threshold=0.5" -F "file=@resources/images/cat.jpg" http://localhost:500
 
 Without the command line: open [http://localhost:5000/docs](http://localhost:5000/docs) in your browser (on Windows too) → **POST /object-count** → **Try it out** → *file*: **Choose File** (any JPEG or PNG) → **Execute**.
 
-**5. Dashboards (optional).** Click into the **first** terminal and press **Ctrl+C** (the dashboards stack starts its own copy of the app on the same port 5000). Then start everything with Prometheus and Grafana (the first time about 10 minutes; it ends with six `Healthy` lines):
+**5. The full demo (optional).** Click into the **first** terminal and press **Ctrl+C** (the demo starts its own copy of the app, in a container, on the same port 5000). Then start everything in one command: the app, TF Serving and the databases in Docker, Prometheus and Grafana, demo data for the dashboards, and the MLflow UI in the background (the first time about 10 minutes; about 5.5 GB RAM). It ends by printing the address of every page, and the prompt comes back:
 
 ```bash
-make monitoring
+make demo
 ```
+
+Add `REQUESTS=200` to also send 200 requests, so the traffic and latency panels have data. Without the demo data and the MLflow UI: `make monitoring`. The demo data replaces the drift baselines in `tmp/baselines/`; `make pull-models` brings the real ones back.
 
 Open Grafana at [http://localhost:3000](http://localhost:3000) (no login needed to view; to edit, *Sign in* with `admin` / `admin`) → *Dashboards* → **Object Counter**, and Prometheus at [http://localhost:9090](http://localhost:9090) → *Status* → *Targets* (`object-counter` and `tfserving` *UP*).
 
@@ -323,7 +327,7 @@ Next: test every feature with [`TESTING-GUIDE.md`](TESTING-GUIDE.md).
 **Stop everything** (the counts stay saved in the databases):
 
 1. If `make start` or `make run-prod` is running in a terminal, press **Ctrl+C** in it.
-2. Stop the containers:
+2. Stop the containers (and the MLflow UI, if `make demo` started it):
 
    ```bash
    cd ~/object-counter-demo
@@ -342,7 +346,7 @@ Next: test every feature with [`TESTING-GUIDE.md`](TESTING-GUIDE.md).
    make start
    ```
 
-   Or, instead, everything with the dashboards: `make monitoring`.
+   Or, instead, the full demo with the dashboards: `make demo` (or `make monitoring`, without the demo data and the MLflow UI).
 
 **Get the latest version of the code** (when the owner has changed it), with everything stopped. `make install` only installs or downloads what changed:
 
@@ -366,9 +370,9 @@ Run `make doctor` first; it catches most of these.
 | `docker: 'compose' is not a docker command` | Compose v2 missing: `sudo apt install -y docker-compose-v2` (the old `docker-compose` v1 isn't supported) |
 | `make up`: `tfserving exited (255)`, log `NOT_FOUND: /models/model_config.config` | `tmp/model` is from an older pull: run `make pull-models` again |
 | `ValueError: No pulled version for models ...` | The models aren't pulled yet: `make install`, then `make start` |
-| `make monitoring`: `port 5000 ... address already in use` | `make start`, `make run-prod` or `make run` is still running; press Ctrl+C in its terminal, the app container takes its place |
+| `make monitoring` or `make demo`: `port 5000 ... address already in use` | `make start`, `make run-prod` or `make run` is still running; press Ctrl+C in its terminal, the app container takes its place |
 | `python -m counter.entrypoints.drift` reports `without_baseline` | It ran with `ENV=dev` (empty in-memory log, unpinned `latest`); use `make drift`, which sets `ENV=prod` like `run-prod` |
-| Drift gauges in Grafana show 0 images right after `make demo-data` | `/metrics` recomputes drift at most every `DRIFT_CACHE_SECONDS` (300 s); wait 5 minutes or lower it in `.env` |
+| Drift gauges in Grafana show 0 images right after `make demo` or `make demo-data` | `/metrics` recomputes drift at most every `DRIFT_CACHE_SECONDS` (300 s); wait 5 minutes or lower it in `.env` |
 | Windows: `docker: command not found` in Ubuntu | Docker Desktop isn't running, or *Settings → Resources → WSL integration → Ubuntu* is off; turn it on, then reopen the Ubuntu window |
 | Windows: `wsl --install` fails or Docker Desktop says *WSL 2 is not installed* / *virtualization* | Enable virtualization in the BIOS/UEFI, run `wsl --update` in an administrator PowerShell, restart |
 | Windows: everything very slow, or `permission denied` on files | The code is under `/mnt/c/...`; clone it again into the Ubuntu home folder (`cd ~`) |
@@ -376,5 +380,7 @@ Run `make doctor` first; it catches most of these.
 | `make: command not found` | Part B step 1 |
 | `503` `Read timed out` right after restarting TF Serving | It is still loading the models: wait until `/health/ready` says `ok` and send the request again |
 | `make test-integration`: a test fails or many are skipped | Its throwaway database containers started too slowly (little RAM): `make down`, then run it again |
-| `make monitoring` slow or containers restarting | Low RAM: check `free -m`; stop other containers or use `make start` without the monitoring stack |
+| `make monitoring` or `make demo` slow or containers restarting | Low RAM: check `free -m`; stop other containers or use `make start` without the monitoring stack |
+| `make demo`: the MLflow page doesn't load | It needs about 25 seconds to start; if it still fails, read `tmp/mlflow-ui.log` (`make setup-models` if `.venv-models` is missing) |
+| `make drift` reports drift everywhere after `make demo` | The demo data replaced the real baselines: `make pull-models` restores them |
 

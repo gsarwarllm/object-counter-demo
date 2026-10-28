@@ -341,7 +341,7 @@ The written answer is [`ANSWERS.md`](ANSWERS.md#task-5-multiple-internally-train
 
 **Dashboards** (terminal 1)
 
-48. Start the whole stack with the app in a container, Prometheus and Grafana (the first time about 10 minutes; it ends with six `Healthy` lines; on Windows also visible in Docker Desktop):
+48. Start the whole stack with the app in a container, Prometheus and Grafana (the first time about 10 minutes; it ends with six `Healthy` lines; on Windows also visible in Docker Desktop). `make demo` would do this, step 67 and the MLflow UI in one command; this guide runs them one at a time to show each:
 
     ```bash
     make monitoring
