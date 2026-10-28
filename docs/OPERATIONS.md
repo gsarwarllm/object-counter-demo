@@ -41,7 +41,7 @@ With several gunicorn workers, the Docker image sets `PROMETHEUS_MULTIPROC_DIR` 
 
 ```bash
 make monitoring        # the whole stack plus Prometheus and Grafana
-make demo              # the same plus demo data, the MLflow UI in the background and every URL
+make demo              # the same with synthetic drift data, apart from the real data, plus the MLflow UI and every URL
 ```
 
 Grafana at [http://localhost:3000](http://localhost:3000) (dashboard "Object Counter": traffic, latency, server errors, detector calls and latency per model version, objects counted per class, prediction and input drift, champion vs candidate during a release); Prometheus at [http://localhost:9090](http://localhost:9090), with alert rules in [`monitoring/alerts.yml`](../monitoring/alerts.yml) (`ModelDrift`, `InputDrift`, `HighServerErrorRate`, `DetectorUnavailable`, `CandidateUnhealthy`; routing them to e-mail or chat needs an Alertmanager). Configuration is in [`monitoring/`](../monitoring/). `make e2e` starts the same profile and checks that Prometheus scrapes the app and TF Serving, loaded the alert rules, and that Grafana loaded the dashboard.
@@ -77,7 +77,7 @@ make demo-data RESET=1 REQUESTS=200              # seeds the drift data, then se
 make drift                                       # or Grafana after DRIFT_CACHE_SECONDS (5 min)
 ```
 
-`make demo [RESET=1] [REQUESTS=n]` does the first two lines in one command and also starts the MLflow UI in the background; `make down` stops all of it.
+`make demo [REQUESTS=n]` does all of it in one command without touching the real data: the stack runs as its own Compose project (`<folder>-demo`, with its own databases), the synthetic baselines go to `tmp/demo/baselines/` (mounted into the app instead of `tmp/baselines/`), the log is always reset first, drift is recomputed every 30 seconds, and the MLflow UI starts in the background. `make down` stops it and deletes the demo databases. Use `make demo-data` only to seed a stack you started yourself.
 
 For each served version (champion and candidate) it writes a synthetic "healthy" baseline to `BASELINES_DIR` and logs 500 synthetic predictions to `prediction_logs`, spread over the drift window, with fixed seeds, so every run gives the same result:
 
