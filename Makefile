@@ -12,6 +12,11 @@ MODELS_VENV := .venv-models
 MPY := $(MODELS_VENV)/bin/python
 REGISTRY := scripts/model_registry.py
 export PYTHONPATH := .
+# make demo runs as its own Compose project (own databases) with its own baselines, so its
+# synthetic data never touches the real counts, prediction log or baselines.
+DEMO_PROJECT := $(shell basename "$(CURDIR)" | tr 'A-Z.' 'a-z-')-demo
+DEMO_BASELINES := tmp/demo/baselines
+DEMO_COMPOSE := COMPOSE_PROJECT_NAME=$(DEMO_PROJECT) BASELINES_HOST_DIR=./$(DEMO_BASELINES) DRIFT_CACHE_SECONDS=30 docker compose --profile app --profile monitoring
 
 .DEFAULT_GOAL := help
 .PHONY: help install install-docker start demo urls doctor setup lock typecheck monitoring baseline drift evaluate canary-check canary-promote run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test coverage test-integration test-models e2e-up test-e2e e2e docs lint format security check clean
@@ -36,11 +41,15 @@ install-docker: ## Linux (Ubuntu) only: install Docker and Compose v2 and join t
 start: up run-prod ## The real models: make up, then make run-prod (Ctrl+C stops the app, make down the services)
 
 # Needs about 5.5 GB RAM; stop make start first (both serve the app on :5000).
-demo: monitoring ## Full demo in one command: make monitoring, demo data, MLflow UI in the background, then the URLs [RESET=1]
-	@$(MAKE) --no-print-directory demo-data
+demo: ## Full demo in one command, separate from the real data: stack + dashboards, synthetic drift data, MLflow UI, URLs [REQUESTS=n]
+	@docker compose --profile app --profile monitoring down
+	@mkdir -p $(DEMO_BASELINES)
+	$(DEMO_COMPOSE) up -d --build --wait
+	BASELINES_DIR=$(DEMO_BASELINES) $(PY) scripts/demo_data.py --demo --reset $(if $(REQUESTS),--requests $(REQUESTS))
 	@if curl -fs -o /dev/null http://127.0.0.1:5001; then echo "MLflow UI already running on :5001"; \
 	else MLFLOW_DISABLE_AGENT_HINT=1 nohup $(MODELS_VENV)/bin/mlflow ui --backend-store-uri sqlite:///tmp/mlflow/registry.db --host 127.0.0.1 --port 5001 >tmp/mlflow-ui.log 2>&1 & \
 	echo $$! >tmp/mlflow-ui.pid; echo "MLflow UI starting in the background on :5001 (about 20 s; log tmp/mlflow-ui.log)"; fi
+	@echo "Demo data in project $(DEMO_PROJECT) and $(DEMO_BASELINES); the drift panels fill within a minute. make down stops it and deletes the demo data."
 	@$(MAKE) --no-print-directory urls
 
 urls: ## Print every URL to try, for this machine or this codespace (docs/DEMO-URLS.md)
@@ -109,8 +118,9 @@ mlflow-ui: ## Browse the local model registry at http://127.0.0.1:5001
 up: ## Start TF Serving, MongoDB and PostgreSQL in Docker and wait until they are healthy
 	docker compose up -d --wait
 
-down: ## Stop the Docker services (all profiles) and the MLflow UI started by make demo
+down: ## Stop the Docker services (all profiles); make demo's stack too, deleting its demo data, and its MLflow UI
 	docker compose --profile app --profile monitoring down
+	@$(DEMO_COMPOSE) down -v --remove-orphans
 	@if [ -f tmp/mlflow-ui.pid ]; then kill $$(cat tmp/mlflow-ui.pid) 2>/dev/null || true; rm -f tmp/mlflow-ui.pid; fi
 
 monitoring: ## Whole stack plus Prometheus (:9090) and Grafana (:3000, dashboard "Object Counter")

@@ -81,7 +81,8 @@ services:
       # `make pull-models`; the folder, so a lock missing on the host isn't created as a folder
       - ./tmp/model:/app/tmp/model:ro
       # Drift baselines per model version, written by `make pull-models` / `make baseline`
-      - ./tmp/baselines:/app/tmp/baselines:ro
+      # (make demo mounts its synthetic ones from tmp/demo/baselines instead)
+      - ${BASELINES_HOST_DIR:-./tmp/baselines}:/app/tmp/baselines:ro
     # Healthy only when the count store is reachable and TF Serving has loaded every pinned
     # model version, so `docker compose up --wait` returns when requests can succeed.
     healthcheck:

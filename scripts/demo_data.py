@@ -38,7 +38,7 @@ from counter.adapters.model_manifest import (
 from counter.adapters.prediction_log import PostgresPredictionLog
 from counter.domain.models import ImageStats, PredictionRecord
 from counter.domain.ports import PredictionLog
-from counter.monitoring.baseline import Baseline, save_baseline
+from counter.monitoring.baseline import DEFAULT_BASELINES_DIR, Baseline, save_baseline
 from counter.monitoring.drift import distributions
 
 BASELINE_IMAGES = 1000
@@ -247,9 +247,9 @@ def main(argv: list[str] | None = None) -> int:
             print(line)
     finally:
         log.close()
-    print(
-        f"Baselines written to {settings.baselines_dir} (make pull-models restores the real ones)"
-    )
+    replaced = settings.baselines_dir.resolve() == DEFAULT_BASELINES_DIR.resolve()
+    restore = " (make pull-models restores the real ones)" if replaced else ""
+    print(f"Baselines written to {settings.baselines_dir}{restore}")
     if args.requests:
         import requests
 

@@ -50,7 +50,7 @@ make setup && make run   # dev: fake model, counts in memory, no Docker (about 1
 make install             # once: Python packages, MLflow, both real models, then a machine check
 make start               # the real models: TF Serving, MongoDB and PostgreSQL in Docker, the app on :5000
 make monitoring          # or everything in Docker, with Prometheus (:9090) and Grafana (:3000)
-make demo                # the full demo: make monitoring + demo data + MLflow UI (:5001), then every URL
+make demo                # the full demo, apart from your data: stack + dashboards + drift demo data + MLflow UI (:5001)
 make down                # stop the containers (the counts stay saved)
 ```
 
