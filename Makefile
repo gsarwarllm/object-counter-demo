@@ -63,6 +63,9 @@ evaluate: ## Quality gate input: make evaluate MODEL=name VERSION=2 [DATASET=fil
 drift: ## Drift report per served model version (JSON; PREDICTION_LOG and BASELINES_DIR as for the app)
 	$(PY) -m counter.entrypoints.drift
 
+demo-data: ## Synthetic drift demo for a LOCAL stack: baselines + predictions per served version [RESET=1] [REQUESTS=n] [URL=...]
+	$(PY) scripts/demo_data.py --demo $(if $(RESET),--reset) $(if $(REQUESTS),--requests $(REQUESTS)) $(if $(URL),--url $(URL))
+
 canary-check: ## Compare a released candidate with the champion in Prometheus: make canary-check MODEL=name [WINDOW=1h]
 	$(PY) -m counter.entrypoints.release_check $(MODEL) --window $(or $(WINDOW),1h)
 

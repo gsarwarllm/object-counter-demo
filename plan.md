@@ -14,11 +14,10 @@ current code (`counter/`, `tests/`, `README.md`, `requirements.txt`, `.vscode/la
 6. [Mandatory tasks (Task.md 1–6 + setup)](#6-mandatory-tasks)
 7. [Optional enhancements](#7-optional-enhancements)
 8. [Optional: Flask → FastAPI migration](#8-optional-flask--fastapi-migration)
-9. [Optional: equivalent implementation in Spring Boot](#9-optional-equivalent-implementation-in-spring-boot)
-10. [Repository strategy: Flask, FastAPI and Spring Boot](#10-repository-strategy-flask-fastapi-and-spring-boot)
-11. [Additional improvements beyond the assignment (MLOps)](#11-additional-improvements-beyond-the-assignment-mlops)
-12. [Appendix A: OpenAPI 3 contract (`docs/openapi.yaml`)](#appendix-a-openapi-3-contract-docsopenapiyaml)
-13. [Appendix B: Definition of done (whole assignment)](#appendix-b-definition-of-done-whole-assignment)
+9. [Repository and Git workflow](#9-repository-and-git-workflow)
+10. [Additional improvements beyond the assignment (MLOps)](#10-additional-improvements-beyond-the-assignment-mlops)
+11. [Appendix A: OpenAPI 3 contract (`docs/openapi.yaml`)](#appendix-a-openapi-3-contract-docsopenapiyaml)
+12. [Appendix B: Definition of done (whole assignment)](#appendix-b-definition-of-done-whole-assignment)
 
 ---
 
@@ -116,13 +115,12 @@ M7 and M8 are implemented as part of M4, since they are the improvements with th
 
 | ID | Enhancement |
 |---|---|
-| O1 | Authentication and authorization (API key, then JWT/OAuth2) |
+| O1 | Authentication and authorization (API key, then JWT/OAuth2). **Outline only** (decision 2026-10-28) |
 | O2 | Extra endpoints: `GET /health`, `GET /object-counts` (read totals) |
 | O3 | CI pipeline (GitHub Actions): lint, unit, integration tests |
 | O4 | Observability: structured logging, request IDs, Prometheus metrics |
 | O5 | Rate limiting |
-| O6 | Flask → FastAPI migration (section 8) |
-| O7 | Equivalent Spring Boot implementation (section 9) |
+| O6 | Flask → FastAPI migration (section 8). **Outline only** (decision 2026-10-28) |
 | O8 | Implement option 6(b), multi-framework detectors, beyond the outline |
 
 ---
@@ -158,7 +156,6 @@ these before or during the interview.
 | A22 | Python version | README says ">= 3.10"; 3.14 fails | Pin **3.12** (`.python-version`, `pyproject.toml`) |
 | A23 | Authentication | Not mentioned at all | Out of mandatory scope; optional O1 |
 | A24 | Non-functional | No latency, throughput or availability targets | No targets; document the TF Serving timeout (10 s) and the upload limit |
-| A25 | Where the Spring Boot version lives | Same repo, a branch, or a separate repo? | **Same repository**, in a `spring-boot/` directory; Python stays at the root. Not a branch. See section 10. |
 
 ---
 
@@ -180,9 +177,8 @@ these before or during the interview.
 | 6 | M6a | Integration + e2e tests, pytest markers | P1 | M | M2, M7 |
 | 7 | M3, M5, M6b | Written answers in `docs/ANSWERS.md` | P1 | S | none |
 | 8 | O2, O3 | Health/totals endpoints, CI | P2 | S | M7 |
-| 9 | O1 | Auth (API key) | P2 | S | M8 |
-| 10 | O6 | FastAPI migration | P2 | M | M1, M4, M8 |
-| 11 | O7 | Spring Boot implementation | P2 | L | M8 (the contract) |
+| 9 | O1 | Auth (API key; **outline only**) | P2 | S | M8 |
+| 10 | O6 | FastAPI migration (**outline only**) | P2 | M | M1, M4, M8 |
 
 Size: S ≈ under half a day, M ≈ a day, L ≈ several days.
 
@@ -190,17 +186,17 @@ Size: S ≈ under half a day, M ≈ a day, L ≈ several days.
 
 ## 5. API specification (contract for every API)
 
-The contract is **framework independent**. Flask, FastAPI and Spring Boot must all produce the
-same JSON. The source of truth is `docs/openapi.yaml` (Appendix A).
+The contract is **framework independent**: Flask, and FastAPI if O6 is ever built, must produce
+the same JSON. The source of truth is `docs/openapi.yaml` (Appendix A).
 
 ### 5.1 Common conventions
 
 | Item | Value |
 |---|---|
-| Base URL (dev) | `http://localhost:5000` (Flask), `:8000` (FastAPI), `:8080` (Spring Boot) |
+| Base URL (dev) | `http://localhost:5000` (Flask), `:8000` (FastAPI) |
 | Request content type | `multipart/form-data` for image endpoints |
 | Response content type | `application/json`; errors use `application/problem+json` |
-| Field naming | `snake_case` (matches the existing API; Spring needs the Jackson `SNAKE_CASE` naming strategy) |
+| Field naming | `snake_case` (matches the existing API) |
 | Number format | `score` and box values are floats in `[0, 1]`; counts are integers `>= 0` |
 | Max upload size | 10 MB (`MAX_UPLOAD_BYTES`, configurable) |
 | Accepted images | JPEG, PNG; decoded by Pillow, converted to RGB |
@@ -388,7 +384,6 @@ curl http://localhost:5000/models
 |---|---|---|
 | Flask (now) | **Contract first:** hand-written `docs/openapi.yaml` (Appendix A), served by Flask at `/openapi.yaml`, with Swagger UI at `/docs` via `flask-swagger-ui` | `counter/entrypoints/webapp.py`, `docs/openapi.yaml` |
 | FastAPI (O6) | Generated from Pydantic models + `responses=` / `openapi_examples`; compared against `docs/openapi.yaml` in a test | `/docs`, `/redoc`, `/openapi.json` |
-| Spring Boot (O7) | `springdoc-openapi-starter-webmvc-ui` + `@Operation`, `@ApiResponse`, `@Schema` | `/swagger-ui.html`, `/v3/api-docs` |
 
 **Contract tests (P1):** `openapi-spec-validator` checks the YAML file is valid. Optionally,
 `schemathesis run docs/openapi.yaml --base-url http://localhost:5000` fuzzes the API
@@ -718,6 +713,13 @@ container, a second model format and a heavier CI job for an optional task). Dia
 
 ### O1: Authentication and authorization (P2)
 
+**Status: outline only, both phases** (user decision, 2026-10-28). The assignment doesn't ask for
+auth, and an internal ML backend is often protected in front of the app (API gateway or service
+mesh) rather than in it. Phase 1 is ready to build and fully testable locally (`AUTH_ENABLED=true`
+with an `API_KEYS` list; no external system); Phase 2 needs a real identity provider to verify
+against, so tests could only use self-signed tokens. Building Phase 1 would touch every client
+(tests, CI smoke, Compose, e2e, `make demo-data`); the design below is what it would follow.
+
 **Assumption:** the clients are internal services or scripts, not end users. No user
 management is needed.
 
@@ -750,9 +752,9 @@ and `security:` per operation; Swagger UI shows an "Authorize" button.
 
 **Per framework**
 
-| Flask | FastAPI | Spring Boot |
-|---|---|---|
-| `before_request` hook or a `@require_scope("counts:write")` decorator; `PyJWT` for JWT | `Security(APIKeyHeader(...))` dependency; `OAuth2PasswordBearer`/`HTTPBearer` + `python-jose`/`PyJWT`; `Security(..., scopes=[...])` | `spring-boot-starter-security`; API key via a `OncePerRequestFilter`; JWT via `spring-boot-starter-oauth2-resource-server` (`issuer-uri`); `@PreAuthorize("hasAuthority('SCOPE_counts:write')")` |
+| Flask | FastAPI |
+|---|---|
+| `before_request` hook or a `@require_scope("counts:write")` decorator; `PyJWT` for JWT | `Security(APIKeyHeader(...))` dependency; `OAuth2PasswordBearer`/`HTTPBearer` + `python-jose`/`PyJWT`; `Security(..., scopes=[...])` |
 
 **Acceptance criteria**
 - [ ] With auth enabled: no key → 401; wrong scope → 403; valid → 200.
@@ -772,6 +774,14 @@ and `security:` per operation; Swagger UI shows an "Authorize" button.
 ---
 
 ## 8. Optional: Flask → FastAPI migration
+
+**Status: outline only** (user decision, 2026-10-28). Flask stays, with the existing architecture.
+The hexagonal design is already exercised without a framework swap: three count stores, a fake and
+a TF Serving detector, and two driving adapters (the web app and the CLI) on the same use cases.
+Replacing working, tested code would add risk without new behaviour; the remaining effort goes to
+testing, documentation and explaining the design. FastAPI appears as "planned" in the architecture
+diagram; the design below is how it would be done (in place of Flask, or alongside it on the same
+use cases and contract tests).
 
 **Principle:** only `counter/entrypoints/`, `config.py` wiring, the tests and the tooling
 change. The domain and adapters stay untouched, which shows the value of the hexagonal design.
@@ -836,237 +846,36 @@ def object_count(file: UploadFile = File(...),
 
 ---
 
-## 9. Optional: equivalent implementation in Spring Boot
+## 9. Repository and Git workflow
 
-**Principle:** keep the same hexagonal layers and the **same API contract** (section 5 /
-Appendix A). The model keeps running in **TF Serving**; Spring Boot replaces only the Python
-service. It lives in the `spring-boot/` directory of this repository, with its own Maven
-build (see section 10).
+### 9.1 One repository
 
-### 9.1 Stack
+Everything lives in this repository, with the Python service at the root. FastAPI (O6, outline
+only) would be a **migration** of the same code, so it would be done on a short-lived feature
+branch (`feat/o6-fastapi-migration`) and merged into `main` by PR, not kept as a long-lived
+alternative branch. A separate repository only pays off with separate teams or release cycles.
 
-Java 21, Spring Boot 3.x, Maven wrapper (`./mvnw`).
-
-| Purpose | Dependency |
-|---|---|
-| REST API | `spring-boot-starter-web` |
-| Validation | `spring-boot-starter-validation` |
-| MongoDB adapter | `spring-boot-starter-data-mongodb` |
-| PostgreSQL adapter | `spring-boot-starter-jdbc` + `org.postgresql:postgresql` + `flyway-core` |
-| OpenAPI / Swagger | `springdoc-openapi-starter-webmvc-ui` |
-| Health / metrics (O2/O4) | `spring-boot-starter-actuator` (+ `micrometer-registry-prometheus`) |
-| Auth (O1) | `spring-boot-starter-security`, `spring-boot-starter-oauth2-resource-server` |
-| Tests | JUnit 5, Mockito, AssertJ, `spring-boot-testcontainers`, Testcontainers (Mongo, Postgres), WireMock |
-
-### 9.2 Package layout and mapping
-
-```
-com.niq.counter
-  domain/model      Box, Prediction, ObjectCount, CountResponse   (records)
-  domain/port       ObjectDetector, ObjectCountRepo               (interfaces)
-  domain/service    CountDetectedObjects, DetectObjects, Predictions (no Spring annotations)
-  domain/error      InvalidImageException, DetectorUnavailableException, RepositoryUnavailableException
-  adapter/detector  TfsObjectDetector, FakeObjectDetector, LabelMap
-  adapter/repo      MongoObjectCountRepo, JdbcObjectCountRepo, InMemoryObjectCountRepo
-  web               ObjectCountController, dto/*, ProblemHandler (@RestControllerAdvice)
-  config            DomainConfig (@Bean wiring), AppProperties (@ConfigurationProperties)
-```
-
-| Python | Spring Boot (framework-specific notes) |
-|---|---|
-| `@dataclass` models | Java `record`s, immutable |
-| `ABC` ports | `interface`s |
-| `over_threshold`, `count` (`reduce`) | streams: `filter(p -> p.score() >= t)`, `collect(groupingBy(Prediction::className, counting()))` |
-| `CountDetectedObjects` | plain class; turned into a bean in `DomainConfig` via `@Bean` so the domain has no Spring dependency |
-| `config.py` + `ENV` dispatch | **Spring profiles** `dev` / `prod`; `@Profile("dev") @Bean FakeObjectDetector`; `@ConditionalOnProperty(name="counter.repo", havingValue="postgres")` replaces `COUNT_REPO` |
-| `os.environ.get(...)` | `application.yml` + `application-prod.yml`, bound to `@ConfigurationProperties("counter")` records; env vars override (`COUNTER_TFS_HOST`) |
-| `TFSObjectDetector` (`requests`, Pillow, numpy) | `RestClient` with connect/read timeouts; `ImageIO.read` → `BufferedImage` → `int[1][h][w][3]` via `getRGB`; Jackson for JSON; label map from `classpath:mscoco_label_map.json`; `RestClientException` → `DetectorUnavailableException`; `ImageIO.read == null` → `InvalidImageException` |
-| `CountMongoDBRepo` (`$inc`, upsert) | `MongoTemplate.upsert(query(where("object_class").is(c)), new Update().inc("count", n), "counter")` |
-| `CountPostgresRepo` | `JdbcClient` with the same `ON CONFLICT ... DO UPDATE` SQL; `@Transactional` on `updateValues`; schema via Flyway `V1__object_counts.sql` |
-| `CountInMemoryRepo` (dict) | `ConcurrentHashMap.merge(cls, n, Long::sum)`, thread-safe (Flask dev is single-threaded, Tomcat isn't) |
-| Flask route | `@RestController`, `@PostMapping(value="/object-count", consumes=MULTIPART_FORM_DATA_VALUE, produces=APPLICATION_JSON_VALUE)` |
-| Form parsing | `@RequestPart("file") MultipartFile file`, `@RequestParam(defaultValue="0.5") @DecimalMin("0.0") @DecimalMax("1.0") double threshold`, `@Validated` on the controller |
-| `MAX_CONTENT_LENGTH` | `spring.servlet.multipart.max-file-size=10MB`, `max-request-size=10MB` → `MaxUploadSizeExceededException` → 413 |
-| `jsonify` snake_case | `spring.jackson.property-naming-strategy=SNAKE_CASE` (Java fields are camelCase) |
-| Error handlers | `@RestControllerAdvice extends ResponseEntityExceptionHandler`, returning `ProblemDetail` (native RFC 7807); `spring.mvc.problemdetails.enabled=true`; map `HandlerMethodValidationException`/`ConstraintViolationException`/`MissingServletRequestPartException`/`MethodArgumentTypeMismatchException` → 400, domain exceptions → 400/503 |
-| `debug.py` (Pillow drawing) | optional `Graphics2D` writer behind `counter.debug-images=true` |
-| `main.py` CLI | optional `CommandLineRunner` under a `cli` profile |
-| Swagger (contract-first YAML) | springdoc: `@Operation`, `@ApiResponse(responseCode="400", content=@Content(schema=@Schema(implementation=ProblemDetail.class)))`, `@Schema(example=...)` on DTOs; UI at `/swagger-ui.html`, spec at `/v3/api-docs` |
-| Health (O2) | Actuator `/actuator/health` with Mongo/DB indicators built in |
-| Auth (O1) | `SecurityFilterChain` bean; `oauth2ResourceServer(jwt)` or an API-key filter; `@PreAuthorize` per endpoint |
-| pytest | JUnit 5 (see 9.4) |
-| `requirements.txt`, venv | `pom.xml`, Maven wrapper |
-| Dockerfile (python) | `./mvnw spring-boot:build-image` (Buildpacks) or Jib; added to the same `docker-compose.yml` |
-
-### 9.3 Controller sketch
-
-```java
-@RestController
-@Validated
-class ObjectCountController {
-    private final CountDetectedObjects countAction;
-    private final DetectObjects detectAction;
-
-    @PostMapping(value = "/object-count", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Count objects above threshold and update totals")
-    CountResponseDto count(@RequestPart("file") MultipartFile file,
-                           @RequestParam(defaultValue = "0.5") @DecimalMin("0.0") @DecimalMax("1.0") double threshold)
-            throws IOException {
-        return CountResponseDto.from(countAction.execute(file.getInputStream(), threshold));
-    }
-}
-```
-
-### 9.4 Tests
-
-| Level | Tooling |
-|---|---|
-| Domain | JUnit 5 + Mockito: the same cases as `tests/domain` |
-| Controller / API | `@WebMvcTest` + `MockMvc.perform(multipart("/object-count").file(...).param("threshold","0.9"))`; asserts JSON and problem+json |
-| Repos | `@DataMongoTest` / `@JdbcTest` + `@Testcontainers` with `@ServiceConnection` (`MongoDBContainer`, `PostgreSQLContainer`); the shared contract tests as an abstract base class |
-| TFS adapter | WireMock returning the recorded TF Serving response; timeout → `DetectorUnavailableException` |
-| E2E | `@SpringBootTest(webEnvironment = RANDOM_PORT)` + Testcontainers (TF Serving container with the model volume) |
-| Contract | compare `/v3/api-docs` with `docs/openapi.yaml` |
-
-### 9.5 Run
-
-```bash
-./spring-boot/mvnw -f spring-boot/pom.xml spring-boot:run -Dspring-boot.run.profiles=dev   # from repo root, http://localhost:8080
-curl -F "threshold=0.9" -F "file=@resources/images/boy.jpg" http://localhost:8080/object-count
-open http://localhost:8080/swagger-ui.html
-```
-
-**Machine setup:** JDK 21 (`sudo apt install -y openjdk-21-jdk`, or SDKMAN without sudo). The
-Maven wrapper downloads Maven itself.
-
-### 9.6 Acceptance criteria
-
-- [ ] The same curl commands (port 8080) return the same JSON shape as the Python service (snake_case).
-- [ ] Every status code in section 5 is produced and tested.
-- [ ] `dev` profile runs with no external services; `prod` profile uses TF Serving + Mongo or Postgres.
-- [ ] Swagger UI lists both endpoints with schemas, examples and error responses.
-- [ ] `domain` packages have no `org.springframework` imports (optionally enforced with an ArchUnit test).
-
----
-
-## 10. Repository strategy: Flask, FastAPI and Spring Boot
-
-### 10.1 Recommendation
-
-| Implementation | Relationship to the Flask code | Where it lives |
-|---|---|---|
-| Flask (now) | the graded deliverable | repository root, unchanged layout |
-| FastAPI (O6) | **replaces** Flask: a migration, not a second implementation | a feature branch (`feat/o6-fastapi-migration`), merged into `main` by PR; Flask is removed |
-| Spring Boot (O7) | **runs alongside** Python: a parallel implementation of the same contract | **same repository**, top-level `spring-boot/` directory, developed on `feat/o7-spring-boot` and merged into `main` |
-
-**Decision:** one repository (monorepo). Branches are used only for short-lived feature work,
-never to hold a long-lived alternative implementation. No separate repository for now.
-
-The key distinction: a **migration** changes the same code over time, which is what branches
-are for. A **parallel implementation** must exist at the same time as the original, which is
-what directories (or repositories) are for.
-
-### 10.2 Options compared
-
-| Criterion | Same repo, separate directories | Separate long-lived branches | Separate repositories |
-|---|---|---|---|
-| Shared API contract (`docs/openapi.yaml`) | one file, one source of truth | copied per branch, **drifts** | copied or published as a package; drifts without extra tooling |
-| Shared test images, label map, `docker-compose.yml` (TF Serving, Mongo, Postgres) | shared directly | duplicated per branch | duplicated, or a third "infra" repo |
-| Parity tests (same requests, same JSON from both services) | one e2e suite runs against both in one CI job | impossible in one checkout | needs cross-repo CI orchestration |
-| A contract change updates both implementations | **one atomic PR** | one PR per branch, easy to forget | coordinated PRs in two repos |
-| What reviewers or evaluators see | everything on `main`, one README | `main` shows only one implementation; the other is hidden in a branch | two links to two READMEs |
-| Merging and history | normal | branches never merge (different languages), so `main` and the branch diverge forever; fixes must be cherry-picked | independent histories, which is fine |
-| Toolchain separation (pip vs Maven) | needs path-filtered CI and a clear layout | natural | natural |
-| Independent releases, versioning and access control | harder (shared tags and permissions) | awkward | **natural** |
-| Repository size and CI time | grows with both | per branch | smallest |
-| Fit for the assignment (one fork to submit) | **best** | poor | poor |
-
-**Why not branches:** a branch is a line of change to the same code, meant to be merged back.
-A Java implementation can never be merged into a Python `main`, so the branch becomes a
-permanent fork inside the repo. It would hide one implementation from reviewers, duplicate
-the contract and infrastructure, and make side-by-side testing impossible.
-
-**Why not separate repos (yet):** the two services share a contract, test data and
-infrastructure, and are worked on by one person for one submission. Splitting them adds
-coordination cost (contract drift, cross-repo e2e tests, two places to review) with none of
-the benefits, which only appear with separate teams or release cycles.
-
-**Why Python stays at the root:** the Flask service is the mandatory, graded deliverable.
-Moving it into `python/` would churn every path (README, Makefile, imports, the CWD-relative
-resource paths, `.vscode/launch.json`) for an optional extra. Spring Boot is self-contained in
-its own directory instead.
-
-### 10.3 When to split into separate repositories
-
-Revisit this decision, and extract `spring-boot/` with history using
-`git subtree split -P spring-boot -b spring-boot-only`, if any of these become true:
-
-- different teams own the two services, or they need different access permissions
-- they need independent release cycles, versions or deployment pipelines
-- CI time or repo size becomes a problem despite path filters
-- the contract is published as a versioned artifact (e.g. an OpenAPI package or a generated client), so each repo can depend on a version of it
-
-### 10.4 Target layout
-
-```
-object-counter-vibe-coding/
-  counter/                  Python service (Flask now, FastAPI after O6)
-  tests/                    Python unit, API and integration tests
-  tests/e2e/                e2e + parity tests, black-box over HTTP; BASE_URL selects the service
-  docs/
-    openapi.yaml            the shared contract for every implementation
-    ANSWERS.md
-  resources/images/         shared test images
-  scripts/download_model.sh
-  docker-compose.yml        tfserving, mongo, postgres + app-python (:5000) and app-java (:8080) under profiles
-  Makefile                  Python targets + java-* targets that call ./spring-boot/mvnw
-  spring-boot/              Spring Boot service, fully self-contained
-    pom.xml, mvnw, .mvn/
-    src/main/java/com/niq/counter/...
-    src/test/java/...
-    README.md               Java-specific setup; links to the root README and the contract
-  README.md                 entry point for both services
-  plan.md
-```
-
-**Sharing rules**
-
-| Shared asset | How Spring Boot uses it |
-|---|---|
-| `docs/openapi.yaml` | contract test compares `/v3/api-docs` with it |
-| `models/models.json`, `models/labels/` | the same model manifest and label maps, read from `../models/` (no duplicate files) |
-| `resources/images/` | test fixtures, referenced as `../resources/images/` |
-| `docker-compose.yml` | `docker compose --profile java up` starts `app-java` with the shared infrastructure |
-| Databases | each service uses its own database name (`counter_python`, `counter_java`) so their totals and tests don't interfere |
-
-### 10.5 Git workflow
+### 9.2 Git workflow
 
 - `main` always builds and passes all tests. No direct commits; every change goes through a PR.
-- One short-lived branch per plan item, named `<type>/<plan-id>-<topic>`: `feat/m1-predictions-endpoint`, `feat/m2-postgres-repo`, `chore/m7-makefile-compose`, `feat/o6-fastapi-migration`, `feat/o7-spring-boot`.
-- Squash-merge to keep `main` readable; delete the branch after merging.
-- A PR that changes `docs/openapi.yaml` must update **every** implementation that exists on `main`, plus the parity tests, in the same PR.
-- Tag milestones that matter for the submission, for example `v1.0-assignment` (all mandatory items) and `v1.1-spring-boot`.
+- One short-lived branch per plan item, named `<type>/<plan-id>-<topic>`: `feat/m1-predictions-endpoint`, `feat/m2-postgres-repo`, `chore/m7-makefile-compose`.
+- Squash-merge to keep `main` readable.
+- A PR that changes `docs/openapi.yaml` updates the implementation and the contract tests in the same PR.
+- Tag milestones that matter for the submission, for example `v1.0-assignment` (all mandatory items).
 
-### 10.6 CI (with O3)
+### 9.3 CI (with O3)
 
-| Job | Runs when these paths change | Steps |
-|---|---|---|
-| `python` | `counter/**`, `tests/**`, `requirements*.txt`, `pyproject.toml` | `make lint test test-integration` |
-| `java` | `spring-boot/**` | `./mvnw -B verify` (JDK 21) |
-| `contract-parity` | `docs/openapi.yaml`, `tests/e2e/**`, or either service | start both services in compose, run `tests/e2e` with `BASE_URL=:5000` and `BASE_URL=:8080` |
+`.github/workflows/ci.yml` runs on every PR and push to `main`: `test`, `integration`, `models`,
+`e2e`, `lint`, `security` and `docker` (details in `README.md`). All must pass before merging.
 
-### 10.7 Acceptance criteria
+### 9.4 Acceptance criteria
 
-- [ ] Spring Boot code lives only under `spring-boot/`; no Java build files at the repo root.
-- [ ] The Python layout at the root is unchanged by O7.
-- [ ] `docs/openapi.yaml` exists once, and both services are tested against it.
-- [ ] The same e2e/parity suite passes against both services.
-- [ ] The root README explains both services and links to `spring-boot/README.md`.
-- [ ] No long-lived implementation branches: after merging, `main` contains everything.
+- [x] One repository; no long-lived implementation branches: after merging, `main` contains everything.
+- [x] `docs/openapi.yaml` exists once, and the API is tested against it (contract tests).
 
 ---
 
-## 11. Additional improvements beyond the assignment (MLOps)
+## 10. Additional improvements beyond the assignment (MLOps)
 
 **Not part of the assignment.** `Task.md` ends at deployment: a model is served, versioned and
 can be rolled back. These items cover what happens after deployment: knowing whether the
@@ -1087,7 +896,9 @@ quality gate on promotion, and a feedback loop with labels.
 | X4 ✅ | Input-data drift: image size, aspect ratio, brightness, contrast, colour mode. Done in PR #23 | P2 | S | X2 |
 | X5 ✅ | Quality gate on `promote-model`: evaluate on a fixed labelled set, refuse a worse model. Done in PR #23 (image-level precision/recall/F1, not mAP) | P2 | M | none |
 | X6 ✅ | Shadow and canary releases for the candidate version. Done in PR #24 (the X5 `candidate` alias, not a separate `challenger`) | P2 | M–L | X1, X2 |
-| X7 | Feedback loop: labelled sampling, accuracy monitoring, retraining trigger, dataset versioning | P3 | L | X2, X5 |
+| X8 ✅ | Database tuning: Postgres fillfactor for HOT updates, prediction-log retention with a BRIN index, Mongo unique index and bulk upserts. Done in PR #25 | P2 | S | M2, X2 |
+| X9 ✅ | Demo data: synthetic baselines and predictions that show drift, moderate drift and stable on the dashboard (`make demo-data`). Done on `feat/demo-data` | P3 | S | X2, X4 |
+| X7 📝 | Feedback loop: labelled sampling, accuracy monitoring, retraining trigger, dataset versioning. **Outline only** (decision 2026-10-28) | P3 | L | X2, X5 |
 
 ### X1: Observability
 
@@ -1190,10 +1001,50 @@ always on the same version) and splitting traffic inside TF Serving are left out
 
 ### X7: Feedback loop
 
+**Status: outline only** (user decision, 2026-10-28). A real loop needs a labelling tool, labellers
+and a training pipeline; the served models are pretrained public ones that this project doesn't
+train, so anything built here would be a simulation. Drift monitoring (X2, X4) covers what can be
+measured without labels.
+
 Sample a small share of production images (with consent and retention rules) for human
 labelling (e.g. Label Studio), measure real precision and recall (the only way to see concept
 drift), trigger retraining on drift or accuracy alerts, and version datasets (DVC or MLflow
 datasets) so each model version links to its training data.
+
+### X8: Database tuning
+
+Both tables grow in ways the first versions ignored. `object_counts` holds a few rows that are
+updated on every request: without free space in each page, every update writes a new row
+version to another page and a new index entry, so table and index bloat between vacuums.
+`prediction_logs` gains a row per model call and was never trimmed. In MongoDB, `counter` had
+no index, so each upsert scanned the collection, and two concurrent first counts of a new class
+could insert two documents.
+
+**As built:** `sql/004_object_counts_fillfactor.sql` sets `fillfactor = 80` (checked first,
+because `ALTER TABLE` takes a lock), so updates stay HOT. `sql/005_prediction_logs_retention.sql`
+adds a BRIN index on `logged_at` (rows arrive in time order; kilobytes instead of a B-tree's
+megabytes). `PostgresPredictionLog.purge(older_than)` deletes in batches of 10 000 rows (short
+transactions, few locks); with `PREDICTION_LOG_RETENTION_DAYS` (default 30, 0 = keep all) the
+background writer runs it at most once an hour, so requests never wait. Mongo: unique index
+`object_class_unique` built lazily on first use (existing duplicates are logged at ERROR and
+counting continues), and one `bulk_write(ordered=False)` per request instead of one `update_one`
+per class. Integration tests check the fillfactor, the primary-key plan for reading some classes,
+the indexes, the purge and its interval, the unique index and concurrent first counts.
+
+### X9: Demo data for the monitoring dashboard
+
+Drift needs hundreds of images per version and a baseline that matches them; the three sample
+images can't show it. `make demo-data` (`scripts/demo_data.py`, a local stack only) writes, for each
+served version (`models.lock.json` and `candidates.lock.json`, or `latest`), a synthetic healthy
+baseline (1000 images) and logs 500 synthetic predictions over the drift window through
+`PostgresPredictionLog`, with fixed seeds. Scenarios: `ssd_mobilenet_v2` turns into a night camera
+(dark, low-contrast greyscale 1280x720, lower scores, fewer detections, other classes: drift on all
+eight features); `acme_shelf_detector` gets slightly darker shelves with more bottles and cups
+(moderate brightness and classes, stable elsewhere); candidates stay stable. `--requests N` sends
+real requests, every tenth invalid, for the traffic, error and release panels. `--reset` deletes
+every `prediction_logs` row; without `--demo` the script refuses to run. Tests check every
+feature's status per scenario, the monitor's reports after seeding, the request mix against a
+running app, and (integration) `main` against PostgreSQL followed by `make drift`.
 
 **Also worth doing (performance and cost):** gRPC or base64 input to TF Serving (R17), TF
 Serving batching, and a load test (Locust or k6) to set latency objectives and size the

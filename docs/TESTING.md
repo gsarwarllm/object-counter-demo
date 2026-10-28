@@ -114,9 +114,9 @@ CI runs the suite twice: once with counts in MongoDB, then again after switching
 
 | Command | Runs | Needs | Time |
 |---|---|---|---|
-| `make test` (also the pre-push hook) | unit, component/API, contract, stub TF Serving integration: 301 tests | Python only | ~15 s |
+| `make test` (also the pre-push hook) | unit, component/API, contract, stub TF Serving integration: 326 tests | Python only | ~15 s |
 | `make coverage` | the same, with a coverage report; fails under 90% | Python only | ~9 s |
-| `make test-integration` | real PostgreSQL and MongoDB: 30 tests | Docker (or `TEST_*` servers) | ~1 min |
+| `make test-integration` | real PostgreSQL and MongoDB: 39 tests | Docker (or `TEST_*` servers) | ~1 min |
 | `make test-models` | model registry scripts against a throwaway MLflow registry: 11 tests | `make setup-models` | ~10 s |
 | `make e2e` | the stack in Docker, then 20 e2e tests (CI adds 4 release tests in shadow and canary mode) | Docker, `make models` | minutes |
 
@@ -126,7 +126,7 @@ Pytest markers keep the slow levels out of the default run: `integration`, `mode
 
 ## 9. Coverage
 
-`make coverage` measures line coverage of `counter/`: about **98%** from the fast suite alone, and CI fails below 90%. Code that can't be meaningfully tested in-process (abstract port methods, `if __name__ == "__main__":`) is excluded in `pyproject.toml`.
+`make coverage` measures line coverage of `counter/`: about **96%** from the fast suite alone (the PostgreSQL purge and Mongo index code run only in integration tests), and CI fails below 90%. Code that can't be meaningfully tested in-process (abstract port methods, `if __name__ == "__main__":`) is excluded in `pyproject.toml`.
 
 Coverage shows what the tests **execute**, not what they **check**: a test with no assertions still adds coverage. It's useful to find untested code, not as a quality score. Mutation testing (e.g. `mutmut`) measures the stronger property, whether tests fail when the code is changed; it's a possible next step.
 
@@ -140,15 +140,16 @@ Coverage shows what the tests **execute**, not what they **check**: a test with 
 
 | Level | Files | Tests | Tools |
 |---|---|---|---|
-| Unit: domain | `tests/domain/` | 13 | pytest, `unittest.mock` |
+| Unit: domain | `tests/domain/` (incl. the threshold business rule, checked before the detector) | 21 | pytest, `unittest.mock` |
 | Unit: drift monitoring and evaluation | `tests/monitoring/` (PSI, feature binning, prediction-drift scenarios such as a model losing confidence, input-drift scenarios such as a new camera or greyscale uploads, baselines incl. old ones, cached monitor, Prometheus collector; evaluation metrics, quality-gate decisions, model card; canary verdicts and release info) | 44 | pytest, synthetic prediction records |
-| Unit / component: adapters | `tests/adapters/test_object_detector.py`, `test_models.py`, `test_debug_image_writer.py`, `test_count_repo_mongo.py`, repo-down tests in `test_count_repo_postgres.py`, `test_prediction_log.py` (in-memory, background writer: queue full, store down), `test_image_stats.py`, `test_shadow_detector.py` (champion answers, class agreement, failing candidate, pool full) | 62 | pytest, `Mock`, Pillow, `caplog` |
-| Component: config, logging, metrics and CLI | `tests/test_config.py`, `tests/test_logging_config.py`, `tests/test_metrics.py` (detector decorator incl. prediction logging, multiprocess metrics, gunicorn hooks), `tests/entrypoints/test_cli.py`, `tests/entrypoints/test_drift_cli.py`, `test_routing.py` (canary share, fallback), `test_release_check.py` (against a stub Prometheus, PromQL injection rejected) | 61 | pytest `monkeypatch`, `capsys`, `runpy`, `prometheus_client` registry, stub HTTP server |
+| Unit / component: adapters | `tests/adapters/test_object_detector.py`, `test_models.py`, `test_debug_image_writer.py`, `test_count_repo_mongo.py`, repo-down tests in `test_count_repo_postgres.py`, `test_prediction_log.py` (in-memory, background writer: queue full, store down), `test_image_stats.py`, `test_shadow_detector.py` (champion answers, class agreement, failing candidate, pool full) | 63 | pytest, `Mock`, Pillow, `caplog` |
+| Component: config, logging, metrics and CLI | `tests/test_config.py`, `tests/test_logging_config.py`, `tests/test_metrics.py` (detector decorator incl. prediction logging, multiprocess metrics, gunicorn hooks), `tests/entrypoints/test_cli.py`, `tests/entrypoints/test_drift_cli.py`, `test_routing.py` (canary share, fallback), `test_release_check.py` (against a stub Prometheus, PromQL injection rejected) | 67 | pytest `monkeypatch`, `capsys`, `runpy`, `prometheus_client` registry, stub HTTP server |
 | Component: API | `tests/entrypoints/test_webapp.py` (incl. shadow and canary releases) | 60 | Flask test client, `caplog` (startup line, 503 cause, 500 traceback) |
 | Contract: API | `tests/entrypoints/test_openapi.py` (incl. responses during a release) | 29 | `openapi-core`, `openapi-spec-validator` |
-| Contract + integration: repositories | `tests/adapters/test_count_repo_contract.py` (memory, PostgreSQL, MongoDB), integration tests in `test_count_repo_postgres.py`, the PostgreSQL prediction log (incl. the migration of an older table) | 25 (18 need Docker) | Testcontainers, psycopg, pymongo |
+| Contract + integration: repositories | `tests/adapters/test_count_repo_contract.py` (memory, PostgreSQL, MongoDB), integration tests in `test_count_repo_postgres.py`, the PostgreSQL prediction log (incl. the migration of an older table), database tuning (fillfactor, index use, BRIN index, retention purge and its interval; Mongo unique index, concurrent first counts, existing duplicates) | 33 (26 need Docker) | Testcontainers, psycopg, pymongo |
 | Integration: API + databases | `tests/integration/test_api_with_databases.py` | 12 | Testcontainers |
 | Integration: API + TF Serving over HTTP | `tests/integration/test_tf_serving_http.py` | 15 | stub HTTP server, recorded response |
 | Integration: model registry | `tests/scripts/test_model_registry.py` (incl. `baseline` and `evaluate` against the stub TF Serving; quality gate, `--force`, candidate serving and its lock with MLflow, `publish --model`) | 21 (11 need MLflow) | MLflow, stub TF Serving |
+| Demo data | `tests/scripts/test_demo_data.py` (every feature's status per scenario, repeatable generation, served versions from the locks, drift monitor after seeding, request mix against a running app, `--demo` required, unreachable app; integration: `main` against PostgreSQL with `--reset`, then the drift CLI) | 11 (1 needs Docker) | synthetic records, werkzeug server, psycopg |
 | End-to-end | `tests/e2e/test_e2e.py`, `tests/e2e/test_monitoring.py` (Prometheus targets, metrics arrive, dashboard queries valid, alert rules loaded, Grafana provisioned; predictions logged in PostgreSQL and drift reported against the CI-computed baseline), `tests/e2e/test_release.py` (shadow and canary, run in their own CI passes) | 24 | Docker Compose, requests, `openapi-core` |
-| **Total** | | **366** | |
+| **Total** | | **400** | |

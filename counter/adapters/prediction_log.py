@@ -1,7 +1,9 @@
 import logging
 import queue
 import threading
-from datetime import datetime
+import time
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from psycopg_pool import ConnectionPool
@@ -16,11 +18,15 @@ logger = logging.getLogger(__name__)
 SCHEMA_FILES = [
     Path(__file__).parent / "sql" / "002_prediction_logs.sql",
     Path(__file__).parent / "sql" / "003_prediction_logs_image_stats.sql",
+    Path(__file__).parent / "sql" / "005_prediction_logs_retention.sql",
 ]
 # Arbitrary constant identifying this schema's advisory lock (see count_repo.py).
 SCHEMA_LOCK_ID = 7_428_312
 # Upper bound for one read, so a drift check on a busy model stays cheap.
 MAX_READ_RECORDS = 50_000
+# Retention deletes in batches, so one purge never holds many row locks or a long transaction.
+PURGE_BATCH = 10_000
+PURGE_INTERVAL_SECONDS = 3600.0
 
 
 class InMemoryPredictionLog(PredictionLog):
@@ -44,7 +50,11 @@ class InMemoryPredictionLog(PredictionLog):
 
 
 class PostgresPredictionLog(PredictionLog):
-    """The table prediction_logs (schema in sql/002_*.sql and sql/003_*.sql)."""
+    """The table prediction_logs (schema in sql/002_*.sql, 003_*.sql and 005_*.sql).
+
+    With a retention period, rows older than it are deleted at most every purge_interval
+    seconds, from append() (which runs in the background writer, so requests never wait).
+    """
 
     INSERT = (
         "INSERT INTO prediction_logs (logged_at, model, version, scores, classes, "
@@ -57,8 +67,19 @@ class PostgresPredictionLog(PredictionLog):
         "WHERE model = %s AND version = %s AND logged_at >= %s "
         "ORDER BY logged_at DESC LIMIT %s"
     )
+    PURGE = (
+        "DELETE FROM prediction_logs WHERE id IN "
+        "(SELECT id FROM prediction_logs WHERE logged_at < %s LIMIT %s)"
+    )
 
-    def __init__(self, conninfo: str, timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        conninfo: str,
+        timeout: float = 5.0,
+        retention: timedelta | None = None,
+        purge_interval: float = PURGE_INTERVAL_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         # A small pool of its own: writes come from one background thread per process.
         self.__pool = ConnectionPool(
             conninfo,
@@ -69,9 +90,14 @@ class PostgresPredictionLog(PredictionLog):
             open=True,
         )
         self.__schema_ready = False
+        self.__retention = retention
+        self.__purge_interval = purge_interval
+        self.__clock = clock
+        self.__purged_at: float | None = None
 
     def append(self, record: PredictionRecord) -> None:
         self.__ensure_schema()
+        self.__purge_if_due()
         stats = record.image
         with self.__pool.connection() as conn:
             conn.execute(
@@ -126,8 +152,30 @@ class PostgresPredictionLog(PredictionLog):
         ]
         return records[::-1]
 
+    def purge(self, older_than: datetime) -> int:
+        """Deletes rows logged before older_than; returns how many."""
+        self.__ensure_schema()
+        deleted = 0
+        while True:
+            with self.__pool.connection() as conn:
+                batch = conn.execute(self.PURGE, (older_than, PURGE_BATCH)).rowcount
+            deleted += batch
+            if batch < PURGE_BATCH:
+                return deleted
+
     def close(self) -> None:
         self.__pool.close()
+
+    def __purge_if_due(self) -> None:
+        if self.__retention is None:
+            return
+        now = self.__clock()
+        if self.__purged_at is not None and now - self.__purged_at < self.__purge_interval:
+            return
+        self.__purged_at = now
+        deleted = self.purge(datetime.now(UTC) - self.__retention)
+        if deleted:
+            logger.info("Prediction log retention: deleted %d rows", deleted)
 
     def __ensure_schema(self) -> None:
         if self.__schema_ready:

@@ -55,6 +55,11 @@ COUNT_REPO=postgres make run-prod
 
 The table `object_counts` is created on first use (schema in `counter/adapters/sql/001_object_counts.sql`). Increments use `INSERT ... ON CONFLICT DO UPDATE`, so concurrent requests don't lose updates. If the database is down, `/object-count` returns `503` (problem+json) and `/object-predictions` keeps working.
 
+Database tuning, applied automatically on first use:
+
+- **PostgreSQL:** `object_counts` is a handful of rows updated on every request, so its pages keep 20% free space (`fillfactor = 80`, `sql/004_object_counts_fillfactor.sql`). PostgreSQL can then rewrite a row in the same page without touching the primary-key index (a HOT update), and neither the table nor the index bloats.
+- **MongoDB:** a unique index on `object_class` (`object_class_unique`) makes lookups by class use an index and stops two concurrent first counts of a class from creating two documents. All increments of one request go in a single `bulk_write`. If older data already holds duplicates, the index can't be built: the app logs an error and keeps counting, and the duplicates have to be merged by hand.
+
 ## Models
 
 Several models can be served side by side. The app never downloads from a public URL at runtime: models go through a **model registry**, here a local [MLflow](https://mlflow.org/) registry (SQLite + a folder under `tmp/mlflow/`) standing in for a private company registry.
@@ -185,6 +190,7 @@ Copy `.env.example` to `.env` to override defaults; `make` and `docker compose` 
 | `PROMETHEUS_MULTIPROC_DIR` | `/tmp/prometheus` in Docker, unset otherwise | Shared directory where gunicorn workers write their metrics, so `/metrics` adds them up |
 | `GRAFANA_ADMIN_PASSWORD` | `admin` | Grafana admin password (monitoring profile; viewers need no login) |
 | `PREDICTION_LOG` | `memory` (dev), `postgres` (prod) | Where model outputs are logged for drift monitoring: `none`, `memory` or `postgres` (uses the `POSTGRES_*`/`DATABASE_URL` settings, whatever `COUNT_REPO` is) |
+| `PREDICTION_LOG_RETENTION_DAYS` | `30` | `postgres` prediction log only: rows older than this are deleted, at most once an hour, in batches of 10 000, by the background writer; `0` keeps everything |
 | `BASELINES_DIR` | `tmp/baselines` | Drift baselines, one `<model>/<version>.json` per version |
 | `DRIFT_WINDOW_HOURS` | `24` | How much recent traffic is compared with the baseline |
 | `DRIFT_MIN_IMAGES` | `30` | Below this many images in the window, no PSI is reported |
@@ -263,7 +269,7 @@ Grafana at [http://localhost:3000](http://localhost:3000) (dashboard "Object Cou
 
 Metrics show whether the service works; drift monitoring shows whether the **model** still behaves as it did when it was released. It needs no labels.
 
-1. **Prediction log.** Every successful model call is logged with its model, version, *every* raw score and class (including those below the caller's threshold: a model losing confidence shows up first as scores sliding toward the threshold), and statistics of the uploaded image: size, colour mode, brightness and contrast (computed on a reduced decode, so they cost little). `PREDICTION_LOG=postgres` (the prod default) writes to the table `prediction_logs` through a background thread, so a slow or unavailable database never delays or fails a request; dropped records are counted in `prediction_log_dropped_total`. `memory` is the dev default; `none` turns it off.
+1. **Prediction log.** Every successful model call is logged with its model, version, *every* raw score and class (including those below the caller's threshold: a model losing confidence shows up first as scores sliding toward the threshold), and statistics of the uploaded image: size, colour mode, brightness and contrast (computed on a reduced decode, so they cost little). `PREDICTION_LOG=postgres` (the prod default) writes to the table `prediction_logs` through a background thread, so a slow or unavailable database never delays or fails a request; dropped records are counted in `prediction_log_dropped_total`. `memory` is the dev default; `none` turns it off. Rows older than `PREDICTION_LOG_RETENTION_DAYS` (default 30) are deleted, using a BRIN index on `logged_at` (`sql/005_prediction_logs_retention.sql`); keep it longer than `DRIFT_WINDOW_HOURS`.
 2. **Baseline per version.** `make baseline` runs reference images through each served version and stores the distributions with that version in MLflow (and in `tmp/baselines/`); `make pull-models` brings them along with the model. The three sample images only demonstrate the workflow: use `IMAGES=` with a validation set that looks like production traffic.
 3. **Comparison.** For each served version, the last `DRIFT_WINDOW_HOURS` of traffic is compared with its baseline using the Population Stability Index (PSI). Below 0.1 is stable, 0.1–0.25 a moderate change, 0.25 or more drift. Results appear as `model_drift_psi{feature=…}` on `/metrics` (recomputed at most every `DRIFT_CACHE_SECONDS`), in the Grafana dashboard and in two alerts:
 
@@ -280,6 +286,26 @@ make drift             # JSON report per served version; python -m counter.entry
 
 Drift doesn't say the model is *wrong*, only that its outputs changed: new cameras, lighting, a different mix of scenes, or a broken upstream component. Checking accuracy needs labels (plan item X7).
 
+### Demo data
+
+To show every drift state on the dashboard without real traffic, seed a **local** stack with synthetic data:
+
+```bash
+make monitoring                                  # or make up + make run-prod; needs make models
+make demo-data RESET=1 REQUESTS=200              # seeds the drift data, then sends 200 requests to the app
+make drift                                       # or Grafana after DRIFT_CACHE_SECONDS (5 min)
+```
+
+For each served version (champion and candidate) it writes a synthetic "healthy" baseline to `BASELINES_DIR` and logs 500 synthetic predictions to `prediction_logs`, spread over the drift window, with fixed seeds, so every run gives the same result:
+
+| Version | Scenario | Statuses |
+|---|---|---|
+| `ssd_mobilenet_v2` | a night camera: dark, low-contrast greyscale 1280×720 images; the model loses confidence, finds fewer objects and other classes | `drift` on every feature |
+| `acme_shelf_detector` | slightly darker shelves with more bottles and cups | `moderate` for `brightness` and `classes`, `stable` elsewhere |
+| any candidate | the same traffic as its baseline | `stable` |
+
+`REQUESTS=n` also sends n real requests (every tenth invalid: bad threshold, not an image, unknown model) to `URL` (default `http://localhost:5000`), which fills the traffic, latency, error and, with `RELEASE_MODE`, the release panels; their images are logged too and can move the statuses a little. `RESET=1` first deletes **every** row of `prediction_logs`. The script refuses to run without `--demo` (the make target passes it). Don't run it against real data: it replaces the baselines in `tmp/baselines/` (`make pull-models` restores the real ones from MLflow).
+
 ## Development
 
 | Command | Does |
@@ -290,6 +316,7 @@ Drift doesn't say the model is *wrong*, only that its outputs changed: new camer
 | `make test-models` | Model registry scripts against a temporary MLflow registry (needs `make setup-models`) |
 | `make e2e` | Start the whole stack in Docker (app container, TF Serving with the real models, databases, Prometheus and Grafana) and run the end-to-end tests; run `make models` first. `make test-e2e` runs the tests against a stack that's already up |
 | `make baseline` / `make drift` / `make evaluate` | Drift baselines for the served versions (needs `make up` and `make setup-models`) / drift report / quality-gate evaluation of a served version (`MODEL=`, `VERSION=`) |
+| `make demo-data` | Synthetic drift scenarios for a local stack's dashboard (`RESET=1`, `REQUESTS=n`, `URL=`); see [Demo data](#demo-data) |
 | `make canary-check` / `make canary-promote` | Compare a released candidate with the champion in Prometheus (`MODEL=`, `WINDOW=`) / the check, then promote the candidate |
 | `make docs` | Validate `docs/openapi.yaml` |
 | `make lint` / `make format` | ruff check / apply fixes and formatting |

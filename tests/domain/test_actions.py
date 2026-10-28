@@ -4,6 +4,7 @@ import pytest
 
 from counter.adapters.count_repo import CountInMemoryRepo
 from counter.domain.actions import CountDetectedObjects, DetectObjects, ReadObjectCounts
+from counter.domain.errors import ValidationError
 from counter.domain.models import ObjectCount
 from tests.domain.helpers import generate_prediction
 
@@ -111,3 +112,28 @@ class TestReadObjectCounts:
         ReadObjectCounts(repo).execute()
 
         assert len(repo.read_values()) == 3
+
+
+@pytest.mark.parametrize("threshold", [-0.1, 1.01, float("nan")])
+@pytest.mark.parametrize(
+    "make_action",
+    [
+        lambda detector: CountDetectedObjects(detector, Mock()),
+        DetectObjects,
+    ],
+    ids=["count", "detect"],
+)
+def test_threshold_outside_0_and_1_is_rejected_before_detection(make_action, threshold):
+    detector = Mock()
+
+    with pytest.raises(ValidationError, match=r"threshold: must be between 0\.0 and 1\.0"):
+        make_action(detector).execute(None, threshold)
+    detector.predict.assert_not_called()
+
+
+@pytest.mark.parametrize("threshold", [0.0, 1.0])
+def test_threshold_bounds_are_allowed(threshold):
+    detector = Mock()
+    detector.predict.return_value = [generate_prediction("cat", 1.0)]
+
+    assert DetectObjects(detector).execute(None, threshold)[0].class_name == "cat"

@@ -87,14 +87,12 @@ def to_models_response_dto(
 
 
 def _parse_threshold(form: Mapping[str, str]) -> float:
+    """Only the format; the range is a business rule, checked by the use cases."""
     raw_threshold = form.get("threshold", DEFAULT_THRESHOLD)
     try:
-        threshold = float(raw_threshold)
+        return float(raw_threshold)
     except ValueError:
         raise ValidationError("threshold", "must be a number") from None
-    if not 0.0 <= threshold <= 1.0:
-        raise ValidationError("threshold", "must be between 0.0 and 1.0")
-    return threshold
 
 
 def _parse_model_name(form: Mapping[str, str], model_names: list[str]) -> str | None:

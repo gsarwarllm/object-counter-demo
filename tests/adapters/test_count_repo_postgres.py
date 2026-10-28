@@ -57,3 +57,25 @@ def test_concurrent_first_use_creates_the_schema_once(postgres_dsn):
         assert repo.read_values() == [ObjectCount("cat", 10)]
     finally:
         repo.close()
+
+
+@pytest.mark.integration
+def test_object_counts_leaves_room_for_in_place_updates(postgres_repo, postgres_dsn):
+    with psycopg.connect(postgres_dsn) as conn:
+        (options,) = conn.execute(
+            "SELECT reloptions FROM pg_class WHERE oid = 'object_counts'::regclass"
+        ).fetchone()
+
+    assert "fillfactor=80" in options
+
+
+@pytest.mark.integration
+def test_reading_some_classes_uses_the_primary_key(postgres_repo, postgres_dsn):
+    postgres_repo.update_values([ObjectCount(f"class{i}", 1) for i in range(50)])
+    with psycopg.connect(postgres_dsn) as conn:
+        conn.execute("SET enable_seqscan = off")  # tiny tables would be scanned anyway
+        plan = conn.execute(
+            "EXPLAIN " + CountPostgresRepo.SELECT_CLASSES, (["class1", "class2"],)
+        ).fetchall()
+
+    assert "object_counts_pkey" in " ".join(row[0] for row in plan)

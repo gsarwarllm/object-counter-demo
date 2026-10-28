@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -5,14 +6,22 @@ from typing import Any
 
 import psycopg
 from psycopg_pool import ConnectionPool, PoolTimeout
-from pymongo import MongoClient
-from pymongo.errors import PyMongoError
+from pymongo import ASCENDING, MongoClient, UpdateOne
+from pymongo.errors import OperationFailure, PyMongoError
 
 from counter.domain.errors import RepositoryUnavailableError
 from counter.domain.models import ObjectCount
 from counter.domain.ports import ObjectCountRepo
 
-SCHEMA_FILE = Path(__file__).parent / "sql" / "001_object_counts.sql"
+logger = logging.getLogger(__name__)
+
+# Applied in order on first use; each file is idempotent.
+SCHEMA_FILES = [
+    Path(__file__).parent / "sql" / "001_object_counts.sql",
+    Path(__file__).parent / "sql" / "004_object_counts_fillfactor.sql",
+]
+# MongoDB's error code for a duplicate key (here: when building the unique index).
+MONGO_DUPLICATE_KEY = 11000
 # Arbitrary constant identifying the schema-creation advisory lock.
 SCHEMA_LOCK_ID = 7_428_311
 
@@ -50,21 +59,52 @@ class CountMongoDBRepo(ObjectCountRepo):
             host, port, serverSelectionTimeoutMS=int(timeout * 1000)
         )
         self.__counter_col = self.__client[database].counter
+        self.__index_ready = False
 
     def read_values(self, object_classes: list[str] | None = None) -> list[ObjectCount]:
         query = {"object_class": {"$in": object_classes}} if object_classes is not None else None
         with _mongo_errors():
+            self.__ensure_index()
             counters = list(self.__counter_col.find(query))
         return [ObjectCount(counter["object_class"], counter["count"]) for counter in counters]
 
     def update_values(self, new_values: list[ObjectCount]) -> None:
+        if not new_values:
+            return
+        # One round trip for all classes of a request.
+        operations = [
+            UpdateOne(
+                {"object_class": value.object_class},
+                {"$inc": {"count": value.count}},
+                upsert=True,
+            )
+            for value in new_values
+        ]
         with _mongo_errors():
-            for value in new_values:
-                self.__counter_col.update_one(
-                    {"object_class": value.object_class},
-                    {"$inc": {"count": value.count}},
-                    upsert=True,
-                )
+            self.__ensure_index()
+            self.__counter_col.bulk_write(operations, ordered=False)
+
+    def __ensure_index(self) -> None:
+        """A unique index on object_class: lookups by class use it, and two concurrent upserts
+        of a new class can't insert two documents (MongoDB retries the losing upsert)."""
+        if self.__index_ready:
+            return
+        try:
+            self.__counter_col.create_index(
+                [("object_class", ASCENDING)], unique=True, name="object_class_unique"
+            )
+        except OperationFailure as error:
+            if error.code != MONGO_DUPLICATE_KEY:
+                raise
+            # Data written before the index can hold duplicates; counting keeps working, but
+            # they must be merged by hand before the index can be built.
+            logger.error(
+                "MongoDB collection %s has duplicate object_class documents; merge them to "
+                "build the unique index: %s",
+                self.__counter_col.full_name,
+                error,
+            )
+        self.__index_ready = True
 
     def check_ready(self) -> None:
         with _mongo_errors():
@@ -137,7 +177,8 @@ class CountPostgresRepo(ObjectCountRepo):
         # pg_type; the advisory lock (released at commit) serializes it across processes.
         with self.__pool.connection() as conn:
             conn.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK_ID,))
-            conn.execute(SCHEMA_FILE.read_text())
+            for schema_file in SCHEMA_FILES:
+                conn.execute(schema_file.read_text())
         self.__schema_ready = True
 
     @contextmanager

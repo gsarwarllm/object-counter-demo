@@ -1,5 +1,6 @@
 from typing import BinaryIO
 
+from counter.domain.errors import ValidationError
 from counter.domain.models import CountResponse, ObjectCount, Prediction
 from counter.domain.ports import DebugImageWriter, ObjectCountRepo, ObjectDetector
 from counter.domain.predictions import count, over_threshold, sort_by_score
@@ -52,12 +53,20 @@ class ReadObjectCounts:
         return sorted(counts, key=lambda object_count: object_count.object_class)
 
 
+def check_threshold(threshold: float) -> None:
+    """Business rule for every driving adapter: a threshold is a score, so it lies in [0, 1]
+    (NaN fails too). Checked before the detector is called."""
+    if not 0.0 <= threshold <= 1.0:
+        raise ValidationError("threshold", "must be between 0.0 and 1.0")
+
+
 def find_valid_predictions(
     object_detector: ObjectDetector,
     image: BinaryIO,
     threshold: float,
     debug_image_writer: DebugImageWriter | None = None,
 ) -> list[Prediction]:
+    check_threshold(threshold)
     predictions = object_detector.predict(image)
     valid_predictions = list(over_threshold(predictions, threshold=threshold))
     if debug_image_writer is not None:

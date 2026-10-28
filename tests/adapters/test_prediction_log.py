@@ -139,3 +139,57 @@ def test_postgres_adds_the_image_columns_to_an_older_table(postgres_dsn):
         log.close()
 
     assert (old.image, new.image) == (None, photo())
+
+
+@pytest.mark.integration
+def test_postgres_purge_deletes_only_old_rows(postgres_log, monkeypatch):
+    monkeypatch.setattr("counter.adapters.prediction_log.PURGE_BATCH", 2)  # several batches
+    for minutes in range(5):
+        postgres_log.append(record([0.5], logged_at=HOUR_AGO - timedelta(days=40, minutes=minutes)))
+    postgres_log.append(record([0.9], logged_at=HOUR_AGO))
+
+    assert postgres_log.purge(HOUR_AGO - timedelta(days=30)) == 5
+    assert [r.scores for r in postgres_log.read("m", "1", HOUR_AGO - timedelta(days=60))] == [[0.9]]
+
+
+@pytest.mark.integration
+def test_postgres_retention_runs_from_append_at_most_once_per_interval(postgres_dsn):
+    with psycopg.connect(postgres_dsn) as conn:
+        conn.execute("DROP TABLE IF EXISTS prediction_logs")
+    now = [0.0]
+    log = PostgresPredictionLog(
+        postgres_dsn, retention=timedelta(days=30), purge_interval=3600, clock=lambda: now[0]
+    )
+    old = HOUR_AGO - timedelta(days=31)
+    try:
+        log.append(record([0.1], logged_at=old))  # purges first (nothing yet), then inserts
+        log.append(record([0.2], logged_at=old))  # within the interval: no purge
+        assert len(log.read("m", "1", old - timedelta(days=1))) == 2
+
+        now[0] = 3600.0
+        log.append(record([0.9]))
+
+        assert [r.scores for r in log.read("m", "1", old - timedelta(days=1))] == [[0.9]]
+    finally:
+        log.close()
+
+
+@pytest.mark.integration
+def test_postgres_has_the_drift_and_retention_indexes(postgres_log, postgres_dsn):
+    postgres_log.append(record([0.5]))
+    with psycopg.connect(postgres_dsn) as conn:
+        indexes = dict(
+            conn.execute(
+                "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'prediction_logs'"
+            ).fetchall()
+        )
+        conn.execute("SET enable_seqscan = off")
+        plan = " ".join(
+            row[0]
+            for row in conn.execute(
+                "EXPLAIN " + PostgresPredictionLog.SELECT, ("m", "1", HOUR_AGO, 10)
+            ).fetchall()
+        )
+
+    assert "USING brin (logged_at)" in indexes["prediction_logs_logged_at_brin"]
+    assert "prediction_logs_model_version_time" in plan

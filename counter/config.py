@@ -99,10 +99,10 @@ def mongo_count_repo() -> ObjectCountRepo:
 
 
 def postgres_count_repo() -> ObjectCountRepo:
-    return CountPostgresRepo(_postgres_conninfo(), timeout=_postgres_timeout())
+    return CountPostgresRepo(postgres_conninfo(), timeout=postgres_timeout())
 
 
-def _postgres_conninfo() -> str:
+def postgres_conninfo() -> str:
     return os.environ.get("DATABASE_URL") or make_conninfo(
         host=os.environ.get("POSTGRES_HOST", "localhost"),
         port=os.environ.get("POSTGRES_PORT", "5432"),
@@ -112,7 +112,7 @@ def _postgres_conninfo() -> str:
     )
 
 
-def _postgres_timeout() -> float:
+def postgres_timeout() -> float:
     return float(os.environ.get("POSTGRES_TIMEOUT", "5"))
 
 
@@ -152,8 +152,20 @@ def get_prediction_log() -> PredictionLog | None:
     if name == "memory":
         return InMemoryPredictionLog()
     return BackgroundPredictionLog(
-        PostgresPredictionLog(_postgres_conninfo(), timeout=_postgres_timeout())
+        PostgresPredictionLog(
+            postgres_conninfo(),
+            timeout=postgres_timeout(),
+            retention=get_prediction_log_retention(),
+        )
     )
+
+
+def get_prediction_log_retention() -> timedelta | None:
+    """PREDICTION_LOG_RETENTION_DAYS (default 30): older rows are deleted; 0 keeps everything."""
+    days = float(os.environ.get("PREDICTION_LOG_RETENTION_DAYS", "30"))
+    if days < 0:
+        raise ValueError(f"PREDICTION_LOG_RETENTION_DAYS must be 0 or more, got {days}")
+    return timedelta(days=days) if days else None
 
 
 @dataclass(frozen=True)

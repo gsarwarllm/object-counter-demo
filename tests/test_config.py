@@ -98,7 +98,7 @@ def test_prediction_log_defaults(monkeypatch, env, expected):
     monkeypatch.setenv("ENV", env)
     monkeypatch.delenv("PREDICTION_LOG", raising=False)
     # Don't open a real connection pool: only which store is built matters here.
-    monkeypatch.setattr(config, "PostgresPredictionLog", lambda conninfo, timeout: "postgres")
+    monkeypatch.setattr(config, "PostgresPredictionLog", lambda conninfo, **settings: "postgres")
 
     log = config.get_prediction_log()
 
@@ -168,3 +168,20 @@ def test_invalid_release_settings_are_rejected(monkeypatch, variable, value, mes
 
     with pytest.raises(ValueError, match=message):
         config.get_release_settings()
+
+
+@pytest.mark.parametrize(
+    ("days", "expected"), [(None, timedelta(days=30)), ("7", timedelta(days=7)), ("0", None)]
+)
+def test_prediction_log_retention(monkeypatch, days, expected):
+    if days is not None:
+        monkeypatch.setenv("PREDICTION_LOG_RETENTION_DAYS", days)
+
+    assert config.get_prediction_log_retention() == expected
+
+
+def test_negative_retention_is_rejected(monkeypatch):
+    monkeypatch.setenv("PREDICTION_LOG_RETENTION_DAYS", "-1")
+
+    with pytest.raises(ValueError, match="0 or more"):
+        config.get_prediction_log_retention()
