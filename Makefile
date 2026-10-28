@@ -14,7 +14,7 @@ REGISTRY := scripts/model_registry.py
 export PYTHONPATH := .
 
 .DEFAULT_GOAL := help
-.PHONY: help install install-docker start urls doctor setup lock typecheck monitoring baseline drift evaluate canary-check canary-promote run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test coverage test-integration test-models e2e-up test-e2e e2e docs lint format security check clean
+.PHONY: help install install-docker start demo urls doctor setup lock typecheck monitoring baseline drift evaluate canary-check canary-promote run run-prod setup-models models download-models publish-models pull-models promote-model mlflow-ui up down logs test coverage test-integration test-models e2e-up test-e2e e2e docs lint format security check clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -34,6 +34,14 @@ install-docker: ## Linux (Ubuntu) only: install Docker and Compose v2 and join t
 	@echo "Done. Log out and in again (or: sudo reboot), then check with: docker run --rm hello-world"
 
 start: up run-prod ## The real models: make up, then make run-prod (Ctrl+C stops the app, make down the services)
+
+# Needs about 5.5 GB RAM; stop make start first (both serve the app on :5000).
+demo: monitoring ## Full demo in one command: make monitoring, demo data, MLflow UI in the background, then the URLs [RESET=1]
+	@$(MAKE) --no-print-directory demo-data
+	@if curl -fs -o /dev/null http://127.0.0.1:5001; then echo "MLflow UI already running on :5001"; \
+	else MLFLOW_DISABLE_AGENT_HINT=1 nohup $(MODELS_VENV)/bin/mlflow ui --backend-store-uri sqlite:///tmp/mlflow/registry.db --host 127.0.0.1 --port 5001 >tmp/mlflow-ui.log 2>&1 & \
+	echo $$! >tmp/mlflow-ui.pid; echo "MLflow UI starting in the background on :5001 (about 20 s; log tmp/mlflow-ui.log)"; fi
+	@$(MAKE) --no-print-directory urls
 
 urls: ## Print every URL to try, for this machine or this codespace (docs/DEMO-URLS.md)
 	@bash scripts/urls.sh
@@ -101,8 +109,9 @@ mlflow-ui: ## Browse the local model registry at http://127.0.0.1:5001
 up: ## Start TF Serving, MongoDB and PostgreSQL in Docker and wait until they are healthy
 	docker compose up -d --wait
 
-down: ## Stop the Docker services (all profiles)
+down: ## Stop the Docker services (all profiles) and the MLflow UI started by make demo
 	docker compose --profile app --profile monitoring down
+	@if [ -f tmp/mlflow-ui.pid ]; then kill $$(cat tmp/mlflow-ui.pid) 2>/dev/null || true; rm -f tmp/mlflow-ui.pid; fi
 
 monitoring: ## Whole stack plus Prometheus (:9090) and Grafana (:3000, dashboard "Object Counter")
 	docker compose --profile app --profile monitoring up -d --build --wait
