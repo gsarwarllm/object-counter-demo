@@ -10,7 +10,7 @@ Every page to open while trying the app, on your own machine or in a GitHub code
 | Who can open it | only this machine | **private** by default: only you, signed in to GitHub. For a panel or a colleague: **Ports** tab → right-click the port → *Port Visibility* → **Public** (anyone with the link, no login). Set it back to *Private* afterwards. |
 | How long it works | while the containers run | while the codespace runs: it stops after the idle timeout (30 minutes by default, up to 4 hours in GitHub *Settings* → *Codespaces*); the address is the same after a restart |
 
-Start the app first: `make start` (API and models) or `make monitoring` (also Grafana and Prometheus). On Windows without WSL: [PowerShell, Docker only](SETUP.md#windows-powershell-docker-only-no-wsl-terminal-no-make).
+Start the app first: `make start` (API and models), `make monitoring` (also Grafana and Prometheus) or `make demo` (all of that plus demo data and the MLflow UI, about 5.5 GB RAM; `make down` stops it all). On Windows without WSL: [PowerShell, Docker only](SETUP.md#windows-powershell-docker-only-no-wsl-terminal-no-make).
 
 ## The pages
 
