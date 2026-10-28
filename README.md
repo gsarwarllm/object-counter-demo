@@ -1,10 +1,38 @@
 # Object Counter: hexagonal architecture for an ML service
 
+[![CI](https://github.com/gsarwarllm/object-counter-demo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gsarwarllm/object-counter-demo/actions/workflows/ci.yml)
+![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/gsarwarllm/object-counter-demo?quickstart=1)
+
 A Flask API that receives an image and a confidence threshold, detects the objects in it with a TensorFlow Serving model, counts those at or above the threshold by class, and keeps running totals in MongoDB or PostgreSQL. It started as the homework in [`Task.md`](Task.md): show hexagonal architecture (ports and adapters) in a machine-learning system. On top of the six tasks it adds monitoring, drift detection and safe model releases, all kept outside the domain.
 
 ![Hexagonal architecture: driving adapters (Flask API, CLI; FastAPI planned) call the use cases in the core, which reach storage and models only through ports implemented by driven adapters (in-memory, MongoDB and PostgreSQL repositories, TF Serving detector)](docs/diagrams/hexagonal_architecture.png)
 
 The domain (use cases and business rules) owns the ports; the API, the CLI, the databases and the models are adapters chosen at startup. Details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## What it does
+
+Send an image and a threshold; get back the objects found at or above it, sorted by score (a real response from the default model):
+
+```bash
+curl -F "threshold=0.5" -F "file=@resources/images/boy.jpg" http://localhost:5000/object-predictions
+```
+
+```json
+{
+  "count": 2,
+  "model": {"name": "ssd_mobilenet_v2", "version": "1"},
+  "predictions": [
+    {"class_name": "person", "score": 0.994504,
+     "box": {"xmin": 0.3770217, "ymin": 0.354917884, "xmax": 0.543941259, "ymax": 0.811709166}},
+    {"class_name": "sports ball", "score": 0.500182271,
+     "box": {"xmin": 0.599595666, "ymin": 0.620696187, "xmax": 0.619402289, "ymax": 0.648074508}}
+  ],
+  "threshold": 0.5
+}
+```
+
+`POST /object-count` does the same detection but also adds the counts per class to the running totals and returns both. Every endpoint: [`docs/API.md`](docs/API.md).
 
 ## Quick start
 
@@ -41,7 +69,9 @@ Needs: `git`, `make`, `curl` and Docker with Compose v2 (`make install-docker` o
 | Drift baselines, quality-gate evaluation, drift report | `make baseline`, `make evaluate MODEL=... VERSION=...`, `make drift` |
 | Canary verdict and promotion | `make canary-check MODEL=...`, `make canary-promote MODEL=...` |
 | Demo data for the dashboards (local stack only) | `make demo-data RESET=1` |
-| Container logs | `make logs` | Dev mode never runs a model: [what each mode really runs](docs/ARCHITECTURE.md#dev-or-prod-what-each-mode-really-runs). `make help` lists every target.
+| Container logs | `make logs` |
+
+Dev mode never runs a model: [what each mode really runs](docs/ARCHITECTURE.md#dev-or-prod-what-each-mode-really-runs). `make help` lists every target.
 
 ## The assignment
 
