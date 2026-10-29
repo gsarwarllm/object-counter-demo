@@ -18,7 +18,7 @@ class (cat, cup, racket, ...) and
 The source code of this application can be shared via a zip folder or GitHub creating a fork
 of this repository.
 
-https://github.com/gsarwarllm/object-counter-demo.git
+https://github.com/arenan02/object-counter
 
 The assignment consists in performing the following tasks:
 
@@ -64,7 +64,7 @@ A panel of two or three NielsenIQ associates will evaluate the candidate to ask 
 
 ## Implementation status (added by the candidate)
 
-The assignment text above is unchanged. This section tracks what has been delivered; details are in [`README.md`](README.md), [`docs/ANSWERS.md`](docs/ANSWERS.md), and [`plan.md`](plan.md).
+The assignment text above is unchanged. This repository is the fork: https://github.com/gsarwarllm/object-counter-demo. This section tracks what has been delivered; details are in [`README.md`](README.md), [`docs/ANSWERS.md`](docs/ANSWERS.md), and [`plan.md`](plan.md).
 
 | Task | Status | Delivered | Commit |
 |---|---|---|---|
