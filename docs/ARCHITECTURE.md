@@ -16,6 +16,8 @@ The application is composed of three layers:
 
 The domain owns the ports (interfaces); adapters on both sides implement or call them, and `counter/config.py` (the composition root) picks the adapters from environment variables. Swapping MongoDB for PostgreSQL, or the fake model for TF Serving, changes no domain code.
 
+For the whole system (adapters, infrastructure, monitoring and the setup-time model pipeline) in one Mermaid diagram, see [System architecture](diagrams/system_architecture.md).
+
 ## Read the code in this order
 
 | # | File | What it shows |
